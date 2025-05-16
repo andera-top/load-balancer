@@ -1,0 +1,42 @@
+version: '3.8'
+
+services:
+  redis:
+    image: redis:7
+    restart: always
+    volumes:
+      - redis-data:/data
+    ports:
+      - "6379:6379"
+
+  andera-load-balancer:
+    image: andera-top/load-balancer
+    build:
+      context: .
+      dockerfile: Dockerfile
+    depends_on:
+      - redis
+    environment:
+      - PORT=${PORT}
+      - REDIS_HOST=redis
+      - REDIS_PORT=${REDIS_PORT}
+      - LB_AUTH_KEY=${LB_AUTH_KEY}
+      - WORKER_DISCOVERY_INTERVAL=${WORKER_DISCOVERY_INTERVAL}
+      - WORKER_DISCOVERY_TIMEOUT=${WORKER_DISCOVERY_TIMEOUT}
+      - WORKER_DISCOVERY_RETRIES=${WORKER_DISCOVERY_RETRIES}
+      - WS_HEARTBEAT_INTERVAL=${WS_HEARTBEAT_INTERVAL}
+      - WS_HEARTBEAT_TIMEOUT=${WS_HEARTBEAT_TIMEOUT}
+      - DASHBOARD_ENABLED=${DASHBOARD_ENABLED}
+      - BULL_BOARD_ENABLED=${BULL_BOARD_ENABLED}
+      - LOG_LEVEL=${LOG_LEVEL}
+      - MAX_LOGS=${MAX_LOGS}
+      - TASK_TIMEOUT=${TASK_TIMEOUT}
+      - TASK_ATTEMPTS=${TASK_ATTEMPTS}
+    ports:
+      - "${PORT}:${PORT}"
+    command: node dist/app.js
+    volumes:
+      - ./workers.json:/app/workers.json
+
+volumes:
+  redis-data: 
