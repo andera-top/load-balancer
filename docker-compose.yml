@@ -32,9 +32,15 @@ services:
       - TASK_ATTEMPTS=${TASK_ATTEMPTS}
     ports:
       - "${PORT}:${PORT}"
+    networks:
+      - andera-net
     command: node dist/app.js
     volumes:
       - ./workers.json:/app/workers.json
 
 volumes:
-  redis-data: 
+  redis-data:
+
+networks:
+  andera-net:
+    external: true
