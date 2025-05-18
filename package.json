@@ -1,6 +1,6 @@
 {
   "name": "@andera-top/load-balancer",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "main": "dist/app.js",
   "scripts": {
     "dev": "concurrently \"npm run watch-dashboard\" \"nodemon src/app.ts\"",

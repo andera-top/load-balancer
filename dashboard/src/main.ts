@@ -46,7 +46,7 @@ function closeDrawer() {
 
 async function openDrawer(worker: DashboardWorker) {
   selectedWorker = worker
-  const encodedUrl = encodeURIComponent(worker.url)
+  const encodedUrl = btoa(worker.url)
   workerLogs = 'Loading...'
   renderDrawer()
   const drawer = document.getElementById('worker-drawer')

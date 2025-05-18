@@ -9,27 +9,25 @@ router.get('/api/workers', (req: Request, res: Response) => {
   res.json(getDiscoveredWorkers())
 })
 
-router.get('/api/workers/:encodedUrl/health', async (req: Request, res: Response) => {
-  const url = decodeURIComponent(req.params.encodedUrl)
-  try {
-    const resp = await axios.get(url.endsWith('/') ? url + 'health' : url + '/health', {
-      headers: { 'x-lb-auth': config.lbAuthKey },
-    })
-    res.json(resp.data)
-  } catch (err) {
-    res.status(500).json({ error: 'Worker unreachable' })
-  }
-})
-
 router.get('/api/workers/:encodedUrl/logs', async (req: Request, res: Response) => {
-  const url = decodeURIComponent(req.params.encodedUrl)
+  let url: string;
+  try {
+    url = Buffer.from(req.params.encodedUrl, 'base64').toString('utf-8');
+  } catch (e) {
+    return res.status(400).json({ error: 'Invalid worker URL encoding' });
+  }
   try {
     const resp = await axios.get(url.endsWith('/') ? url + 'logs' : url + '/logs', {
       headers: { 'x-lb-auth': config.lbAuthKey },
     })
     res.json(resp.data)
   } catch (err) {
-    res.status(500).json({ error: 'Worker unreachable' })
+    const error = err as any;
+    if (error && error.response) {
+      res.status(500).json({ error: 'Worker unreachable', details: error.response.data, status: error.response.status })
+    } else {
+      res.status(500).json({ error: 'Worker unreachable', details: error && error.message })
+    }
   }
 })
 
