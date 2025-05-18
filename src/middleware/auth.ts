@@ -13,6 +13,6 @@ export function requireAuth(options?: { header?: string }) {
     if (authKey === config.lbAuthKey) {
       return next()
     }
-    return res.status(401).json({ error: 'Unauthorized (LB)' })
+    return res.status(401).json({ error: 'Unauthorized' })
   }
 }
