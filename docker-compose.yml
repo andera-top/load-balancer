@@ -6,6 +6,8 @@ services:
       - redis-data:/data
     ports:
       - "6379:6379"
+    networks:
+      - andera-net
 
   andera-load-balancer:
     image: andera-top/load-balancer
@@ -16,7 +18,7 @@ services:
       - redis
     environment:
       - PORT=${PORT}
-      - REDIS_HOST=redis
+      - REDIS_HOST=${REDIS_HOST}
       - REDIS_PORT=${REDIS_PORT}
       - LB_AUTH_KEY=${LB_AUTH_KEY}
       - WORKER_DISCOVERY_INTERVAL=${WORKER_DISCOVERY_INTERVAL}
