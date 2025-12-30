@@ -19,7 +19,7 @@ import { startTaskWorker } from './utils/taskProcessor'
 const app = express()
 
 app.use(compression())
-app.use(express.json())
+app.use(express.json({ limit: config.requestBodyLimit }))
 
 if (config.dashboardEnabled) {
   app.use('/dashboard', express.static(path.join(__dirname, '../dashboard/dist')))

@@ -20,6 +20,7 @@ export const config = {
   workerDiscoveryRetries: parseInt(process.env.WORKER_DISCOVERY_RETRIES || '10', 10),
   taskTimeout: parseInt(process.env.TASK_TIMEOUT || '300000', 10),
   taskAttempts: parseInt(process.env.TASK_ATTEMPTS || '3', 10),
+  requestBodyLimit: process.env.REQUEST_BODY_LIMIT || '10mb',
 }
 
 function assertConfig() {

@@ -80,6 +80,7 @@ Below are the main environment variables used by the Load Balancer. All variable
 | `MAX_LOGS`                  | Number of log lines to keep in memory (for `/logs`).                                       | `1000`                 |
 | `TASK_TIMEOUT`              | Timeout (ms) for task execution.                                                           | `300000`               |
 | `TASK_ATTEMPTS`             | Number of attempts for a task before failure.                                              | `3`                    |
+| `REQUEST_BODY_LIMIT`        | Maximum size of request body (supports kb, mb, gb units).                                  | `10mb`                 |
 
 ### Example `.env`
 
@@ -99,6 +100,7 @@ LOG_LEVEL=info
 MAX_LOGS=1000
 TASK_TIMEOUT=300000
 TASK_ATTEMPTS=3
+REQUEST_BODY_LIMIT=10mb
 ```
 
 For advanced configuration, see the [Load Balancer Configuration Guide](https://andera.top/docs/load-balancer/configuration/).

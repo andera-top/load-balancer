@@ -10,11 +10,11 @@ router.get('/api/workers', (req: Request, res: Response) => {
 })
 
 router.get('/api/workers/:encodedUrl/logs', async (req: Request, res: Response) => {
-  let url: string;
+  let url: string
   try {
-    url = Buffer.from(req.params.encodedUrl, 'base64').toString('utf-8');
+    url = Buffer.from(req.params.encodedUrl, 'base64').toString('utf-8')
   } catch (e) {
-    return res.status(400).json({ error: 'Invalid worker URL encoding' });
+    return res.status(400).json({ error: 'Invalid worker URL encoding' })
   }
   try {
     const resp = await axios.get(url.endsWith('/') ? url + 'logs' : url + '/logs', {
@@ -22,7 +22,7 @@ router.get('/api/workers/:encodedUrl/logs', async (req: Request, res: Response) 
     })
     res.json(resp.data)
   } catch (err) {
-    const error = err as any;
+    const error = err as any
     if (error && error.response) {
       res.status(500).json({ error: 'Worker unreachable', details: error.response.data, status: error.response.status })
     } else {
