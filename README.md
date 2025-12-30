@@ -119,9 +119,7 @@ For advanced configuration, see the [Load Balancer Configuration Guide](https://
 ]
 ```
 
-:::info
-It is strictly recommended to use HTTPS for your Workers **if they are exposed on the Internet** (this is not necessary when using the Load Balancer, which can be the only one exposed). When using HTTP, the Worker connects to the Load Balancer via `ws://`. When using HTTPS, it connects via `wss://`.
-:::
+> **Note:** It is strictly recommended to use HTTPS for your Workers **if they are exposed on the Internet** (this is not necessary when using the Load Balancer, which can be the only one exposed). When using HTTP, the Worker connects to the Load Balancer via `ws://`. When using HTTPS, it connects via `wss://`.
 
 #### Docker network
 
@@ -166,7 +164,7 @@ npm start
 
 ### Docker setup
 
-You should use Docker Compose to run the Load Balancer together with Redis and enable hot-reload of the `Workers.json` file.
+You should use Docker Compose to run the Load Balancer together with Redis and enable hot-reload of the `workers.json` file.
 
 #### Create a Docker network for Andera
 
@@ -186,7 +184,7 @@ docker-compose build
 docker-compose up
 ```
 
-This will start both Redis and the Load Balancer, and automatically mount your local `Workers.json` file into the container for live updates.
+This will start both Redis and the Load Balancer, and automatically mount your local `workers.json` file into the container for live updates.
 
 > **Do not use `docker run` directly.** The recommended way is to use `docker-compose up` to ensure all dependencies and configuration are handled correctly.
 
