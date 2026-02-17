@@ -2,10 +2,9 @@ services:
   redis:
     image: redis:7
     restart: always
+    command: redis-server --appendonly yes --replicaof no one
     volumes:
       - redis-data:/data
-    ports:
-      - "6379:6379"
     networks:
       - andera-net
 
@@ -33,7 +32,7 @@ services:
       - TASK_TIMEOUT=${TASK_TIMEOUT}
       - TASK_ATTEMPTS=${TASK_ATTEMPTS}
     ports:
-      - "${PORT}:${PORT}"
+      - "127.0.0.1:${PORT}:${PORT}"
     networks:
       - andera-net
     command: node dist/app.js
