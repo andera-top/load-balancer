@@ -63,10 +63,10 @@ All configuration for the Load Balancer is managed through the `.env` file.
 
 Below are the main environment variables used by the Load Balancer. All variables are set in your `.env` file.
 
-| Variable                    | Description                                                                                 | Default                |
-|-----------------------------|---------------------------------------------------------------------------------------------|------------------------|
+| Variable                    | Description                                                                                | Default                |
+|-----------------------------|--------------------------------------------------------------------------------------------|------------------------|
 | `PORT`                      | HTTP port for the Load Balancer API.                                                       | `4000`                 |
-| `REDIS_HOST`                | Host for the Redis instance used by BullMQ.                                                | `localhost`            |
+| `REDIS_HOST`                | Host for the Redis instance used by BullMQ.                                                | `redis`                |
 | `REDIS_PORT`                | Port for the Redis instance used by BullMQ.                                                | `6379`                 |
 | `LB_AUTH_KEY`               | Authentication key for the Load Balancer and Worker communication or to use the endpoints. | `default-lb-auth-key`  |
 | `WORKER_DISCOVERY_INTERVAL` | Interval (ms) for polling Workers for status.                                              | `3000`                 |
@@ -86,7 +86,7 @@ Below are the main environment variables used by the Load Balancer. All variable
 
 ```env
 PORT=4000
-REDIS_HOST=localhost
+REDIS_HOST=redis
 REDIS_PORT=6379
 LB_AUTH_KEY=default-lb-auth-key
 WORKER_DISCOVERY_INTERVAL=3000
