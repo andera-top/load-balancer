@@ -10,7 +10,7 @@ async function checkServices() {
   let redisReady = false
   try {
     const client = await taskQueue.client
-    await client.set('healthcheck:test', '1', 'EX', 5)
+    await client.set('healthcheck:test', '1', { EX: 5 })
     redisReady = true
   } catch {
     redisReady = false
