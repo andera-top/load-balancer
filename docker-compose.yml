@@ -10,6 +10,7 @@ services:
 
   andera-load-balancer:
     image: andera-top/load-balancer
+    restart: unless-stopped
     build:
       context: .
       dockerfile: Dockerfile
