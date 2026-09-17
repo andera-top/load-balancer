@@ -11,6 +11,7 @@
 ## What is Andera?
 
 Andera is composed of three main components:
+
 - **Load Balancer:** Routes and prioritizes tasks, manages Worker clusters, and provides a dashboard for monitoring.
 - **Base Worker:** Template for building your own custom Workers.
 - **Worker Core:** The core engine for all Workers.
@@ -34,13 +35,15 @@ The Load Balancer is the entrypoint and orchestrator for the Andera platform. It
 - **Authentication:** Forwards client authentication headers to Workers; validates requests with its own key.
 - **Native logging:** Exposes last 1000 logs via `/logs` (authentication required).
 
+> **Queue process boundary:** Run one active Load Balancer process per Redis queue. BullMQ stores jobs in Redis, while the waiting HTTP response and Worker credential remain in that LB process. Requests cannot resume on another LB replica or after a restart; orphaned jobs fail visibly instead of being reported as successful.
+
 ---
 
 ## Getting Started
 
 ### Prerequisites
 
-- [Node.js](https://nodejs.org/) (v18+ recommended)
+- [Node.js](https://nodejs.org/) (v18.14.1+; Docker uses Node 20)
 - [npm](https://www.npmjs.com/) or [yarn](https://yarnpkg.com/)
 - [Docker](https://www.docker.com/) (optional)
 
@@ -63,24 +66,24 @@ All configuration for the Load Balancer is managed through the `.env` file.
 
 Below are the main environment variables used by the Load Balancer. All variables are set in your `.env` file.
 
-| Variable                    | Description                                                                                | Default                |
-|-----------------------------|--------------------------------------------------------------------------------------------|------------------------|
-| `PORT`                      | HTTP port for the Load Balancer API.                                                       | `4000`                 |
-| `REDIS_HOST`                | Host for the Redis instance used by BullMQ.                                                | `redis`                |
-| `REDIS_PORT`                | Port for the Redis instance used by BullMQ.                                                | `6379`                 |
-| `LB_AUTH_KEY`               | Authentication key for the Load Balancer and Worker communication or to use the endpoints. | `default-lb-auth-key`  |
-| `WORKER_DISCOVERY_INTERVAL` | Interval (ms) for polling Workers for status.                                              | `3000`                 |
-| `WORKER_DISCOVERY_TIMEOUT`  | Timeout (ms) for Worker discovery requests.                                                | `3000`                 |
-| `WORKER_DISCOVERY_RETRIES`  | Number of retries for Worker discovery.                                                    | `10`                   |
-| `WS_HEARTBEAT_INTERVAL`     | Interval (ms) for WebSocket heartbeat pings.                                               | `3000`                 |
-| `WS_HEARTBEAT_TIMEOUT`      | Timeout (ms) for WebSocket heartbeat.                                                      | `3000`                 |
-| `DASHBOARD_ENABLED`         | Enable or disable the dashboard interface on `/dashboard`.                                 | `true`                 |
-| `BULL_BOARD_ENABLED`        | Enable or disable the BullMQ dashboard interface on `/bull`.                               | `true`                 |
-| `LOG_LEVEL`                 | Log verbosity (`info`, `warn`, `error`, etc.).                                             | `info`                 |
-| `MAX_LOGS`                  | Number of log lines to keep in memory (for `/logs`).                                       | `1000`                 |
-| `TASK_TIMEOUT`              | Timeout (ms) for task execution.                                                           | `300000`               |
-| `TASK_ATTEMPTS`             | Number of attempts for a task before failure.                                              | `3`                    |
-| `REQUEST_BODY_LIMIT`        | Maximum size of request body (supports kb, mb, gb units).                                  | `10mb`                 |
+| Variable                    | Description                                                                                | Default  |
+| --------------------------- | ------------------------------------------------------------------------------------------ | -------- |
+| `PORT`                      | HTTP port for the Load Balancer API.                                                       | `4000`   |
+| `REDIS_HOST`                | Host for the Redis instance used by BullMQ.                                                | `redis`  |
+| `REDIS_PORT`                | Port for the Redis instance used by BullMQ.                                                | `6379`   |
+| `LB_AUTH_KEY`               | Authentication key for the Load Balancer and Worker communication or to use the endpoints. | Required |
+| `WORKER_DISCOVERY_INTERVAL` | Interval (ms) for polling Workers for status.                                              | `3000`   |
+| `WORKER_DISCOVERY_TIMEOUT`  | Timeout (ms) for Worker discovery requests.                                                | `3000`   |
+| `WORKER_DISCOVERY_RETRIES`  | Number of retries for Worker discovery.                                                    | `10`     |
+| `WS_HEARTBEAT_INTERVAL`     | Interval (ms) for WebSocket heartbeat pings.                                               | `3000`   |
+| `WS_HEARTBEAT_TIMEOUT`      | Timeout (ms) for WebSocket heartbeat.                                                      | `3000`   |
+| `DASHBOARD_ENABLED`         | Enable or disable the dashboard interface on `/dashboard`.                                 | `false`  |
+| `BULL_BOARD_ENABLED`        | Enable or disable the BullMQ dashboard interface on `/bull`.                               | `false`  |
+| `LOG_LEVEL`                 | Log verbosity (`info`, `warn`, `error`, etc.).                                             | `info`   |
+| `MAX_LOGS`                  | Number of log lines to keep in memory (for `/logs`).                                       | `1000`   |
+| `TASK_TIMEOUT`              | Timeout (ms) for task execution.                                                           | `300000` |
+| `TASK_ATTEMPTS`             | Number of attempts for a task before failure.                                              | `3`      |
+| `REQUEST_BODY_LIMIT`        | Maximum size of request body (supports kb, mb, gb units).                                  | `10mb`   |
 
 ### Example `.env`
 
@@ -88,7 +91,7 @@ Below are the main environment variables used by the Load Balancer. All variable
 PORT=4000
 REDIS_HOST=redis
 REDIS_PORT=6379
-LB_AUTH_KEY=default-lb-auth-key
+LB_AUTH_KEY=<random-key>
 WORKER_DISCOVERY_INTERVAL=3000
 WORKER_DISCOVERY_TIMEOUT=3000
 WORKER_DISCOVERY_RETRIES=10
@@ -114,9 +117,7 @@ For advanced configuration, see the [Load Balancer Configuration Guide](https://
 - This file is read at startup and can be hot-reloaded for dynamic cluster management.
 
 ```json
-[
-  "http://localhost:3000"
-]
+["http://localhost:3000"]
 ```
 
 > **Note:** It is strictly recommended to use HTTPS for your Workers **if they are exposed on the Internet** (this is not necessary when using the Load Balancer, which can be the only one exposed). When using HTTP, the Worker connects to the Load Balancer via `ws://`. When using HTTPS, it connects via `wss://`.
@@ -126,9 +127,7 @@ For advanced configuration, see the [Load Balancer Configuration Guide](https://
 When using Docker on your Mac/Windows machine, your Load Balancer and Workers can communicate using the `host.docker.internal` domain. Example of a `workers.json` file when you're working on your machine:
 
 ```json
-[
-  "http://host.docker.internal:3000"
-]
+["http://host.docker.internal:3000"]
 ```
 
 This works out of the box, as host.docker.internal is resolved by Docker.
@@ -136,9 +135,7 @@ This works out of the box, as host.docker.internal is resolved by Docker.
 That said, it won't work on a Linux-type production machine, which is why the Load Balancer and Andera Workers use an `andera-net` network. In this configuration, this syntax must be used for production:
 
 ```json
-[
-  "http://service-name:3000"
-]
+["http://service-name:3000"]
 ```
 
 Where `service-name` is the Docker Compose service name.
@@ -219,6 +216,7 @@ npm start
 ```
 
 Or, if using Docker:
+
 ```bash
 docker network create andera-net
 docker-compose build
@@ -226,11 +224,13 @@ docker-compose up
 ```
 
 Test the health endpoint:
+
 ```bash
 curl http://localhost:4000/health
 ```
 
 Expected response:
+
 ```json
 {
   "status": "ready"
@@ -240,6 +240,7 @@ Expected response:
 ### 2. Submit a Task
 
 Call the `/task` endpoint to route a task to a connected Worker. You must specify the `group`, `contract`, and `function` fields, and provide two headers:
+
 - `Authorization: <LB_AUTH_KEY>` (your Load Balancer's LB_AUTH_KEY)
 - `x-wr-auth: <AUTH_KEY>` (the target Worker's AUTH_KEY)
 
@@ -255,7 +256,9 @@ curl -X POST http://localhost:4000/task \
     "group": "default"
   }'
 ```
+
 Expected response:
+
 ```json
 {
   "success": true,
@@ -293,3 +296,17 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for repository guidelines, and [How to Co
 ## License
 
 For license details, see the [LICENSE](LICENSE) file.
+
+## Native MCP
+
+Expose selected functions to agents at `/mcp` without another service. Set a distinct `MCP_AUTH_KEY`, copy `mcp.example.json` to `mcp.json`, and set the environment variables referenced by each target's `workerAuthKeyEnv`. Agents configure only the endpoint URL and the MCP bearer token.
+
+The configuration reloads live. Omit `functions` for all functions within a target; use an explicit list to restrict access. Missing configuration or token disables MCP. Invalid edits keep the last valid configuration; removing the file disables new access.
+
+The LB uses existing Worker REST endpoints and internal credentials. Workers do not need MCP enabled. Replicas of a group/contract must share the configured key. The optional `docker-compose.mcp.yml` mounts `.mcp/mcp.json` through a directory for atomic-save support.
+
+Authenticated `/health` shows the full MCP status, target selection, exact tool names, input schemas and sanitized reload errors. The dashboard asks for no token and shows only the endpoint, enabled state, tool titles and availability.
+
+V1 supports stateless Streamable HTTP and synchronous calls. It does not implement OAuth; ChatGPT web compatibility is therefore not promised. See [MCP documentation](https://andera.top/docs/mcp).
+
+Run `npm test` for protocol/security tests and the LB/Redis integration test (requires local `redis-server`).

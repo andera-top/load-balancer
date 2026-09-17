@@ -9,6 +9,7 @@
 
 # Environment variables
 /.env
+/.mcp/
 
 # npm and Yarn
 npm-debug.log*

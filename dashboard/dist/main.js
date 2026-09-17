@@ -8,6 +8,9 @@ var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, ge
         step((generator = generator.apply(thisArg, _arguments || [])).next());
     });
 };
+function escapeHtml(value) {
+    return String(value !== null && value !== void 0 ? value : '').replace(/[&<>"']/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[char]);
+}
 function fetchWorkers() {
     return __awaiter(this, void 0, void 0, function* () {
         const res = yield fetch('/dashboard/api/workers');
@@ -44,7 +47,7 @@ function closeDrawer() {
 function openDrawer(worker) {
     return __awaiter(this, void 0, void 0, function* () {
         selectedWorker = worker;
-        const encodedUrl = btoa(worker.url);
+        const encodedUrl = btoa(worker.url).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
         workerLogs = 'Loading...';
         renderDrawer();
         const drawer = document.getElementById('worker-drawer');
@@ -98,16 +101,16 @@ function renderDrawer() {
         content.innerHTML = `
       <button class="drawer-close" onclick="window.closeDrawer()">×</button>
       <div class="drawer-section terminal-section">
-        <h3>Contract (V${selectedWorker.contract || '?'})</h3>
-        <pre>${selectedWorker.functions ? JSON.stringify(selectedWorker.functions, null, 2) : '-'}</pre>
+        <h3>Contract (V${escapeHtml(selectedWorker.contract || '?')})</h3>
+        <pre>${escapeHtml(selectedWorker.functions ? JSON.stringify(selectedWorker.functions, null, 2) : '-')}</pre>
       </div>
       <div class="drawer-section terminal-section">
         <h3>Logs</h3>
-        <pre>${Array.isArray(workerLogs)
+        <pre>${escapeHtml(Array.isArray(workerLogs)
             ? workerLogs.join('\n').trim()
             : typeof workerLogs === 'string'
                 ? workerLogs.replace(/\\n|\\r\\n/g, '\n').trim()
-                : workerLogs}</pre>
+                : workerLogs)}</pre>
       </div>
     `;
     }
@@ -137,32 +140,37 @@ function renderWorkersList(workers) {
         else if (w.tags && typeof w.tags === 'object') {
             tags = Object.entries(w.tags).map(([name, value]) => ({ name, value: String(value) }));
         }
-        const urlObj = new URL(w.url);
-        const httpUrl = `${urlObj.protocol}//${urlObj.hostname}${urlObj.port ? ':' + urlObj.port : ''}`;
-        const wsProtocol = urlObj.protocol === 'https:' ? 'wss:' : 'ws:';
-        const wsPort = w.websocketPort || urlObj.port;
-        const wsUrl = `${wsProtocol}//${urlObj.hostname}${wsPort ? ':' + wsPort : ''}`;
-        html += `<li class="worker-item" data-url="${encodeURIComponent(w.url)}">
+        let httpUrl = w.url;
+        let wsUrl = '-';
+        try {
+            const urlObj = new URL(w.url);
+            httpUrl = `${urlObj.protocol}//${urlObj.hostname}${urlObj.port ? ':' + urlObj.port : ''}`;
+            const wsProtocol = urlObj.protocol === 'https:' ? 'wss:' : 'ws:';
+            const wsPort = w.websocketPort || urlObj.port;
+            wsUrl = `${wsProtocol}//${urlObj.hostname}${wsPort ? ':' + wsPort : ''}`;
+        }
+        catch (_g) { }
+        html += `<li class="worker-item" data-url="${escapeHtml(encodeURIComponent(w.url))}">
       <div class="worker-header">
-        <h2><span class="group ${getStatusClass(w)}">${w.group || '-'}</span><span class="version">(V${w.contract || '?'})</span></h2>
+        <h2><span class="group ${getStatusClass(w)}">${escapeHtml(w.group || '-')}</span><span class="version">(V${escapeHtml(w.contract || '?')})</span></h2>
         <div class="worker-urls">
-          <div>Host: <span class="worker-url" title="${w.url}">${httpUrl}</span></div>
-          <div>WebSockets: <span class="worker-ws-url">${wsUrl}</span></div>
+          <div>Host: <span class="worker-url" title="${escapeHtml(w.url)}">${escapeHtml(httpUrl)}</span></div>
+          <div>WebSockets: <span class="worker-ws-url">${escapeHtml(wsUrl)}</span></div>
         </div>
       </div>`;
         if (tags.length) {
             html += `<div class="worker-tags">
-        ${tags.map(t => `<span class='worker-tag'>${t.name}${t.value ? ': ' + t.value : ''}</span>`).join('')}
+        ${tags.map(t => `<span class='worker-tag'>${escapeHtml(t.name)}${escapeHtml(t.value ? ': ' + t.value : '')}</span>`).join('')}
       </div>`;
         }
         if (Array.isArray(w.services) && w.services.length > 0) {
             html += `<div class="worker-services">
-        ${w.services.map(s => `<span class="worker-service"><span style="display:inline-block;width:10px;height:10px;border-radius:50%;margin-right:6px;vertical-align:middle;background:${s.state === 'up' ? '#40b08c' : '#b3243e'}"></span>${s.name}</span>`).join('')}
+        ${w.services.map(s => `<span class="worker-service"><span style="display:inline-block;width:10px;height:10px;border-radius:50%;margin-right:6px;vertical-align:middle;background:${s.state === 'up' ? '#40b08c' : '#b3243e'}"></span>${escapeHtml(s.name)}</span>`).join('')}
       </div>`;
         }
         html += `<ul class="worker-stats">
-      <li>Slots<strong>${(_b = (_a = w.slots) === null || _a === void 0 ? void 0 : _a.used) !== null && _b !== void 0 ? _b : '-'}/${(_d = (_c = w.slots) === null || _c === void 0 ? void 0 : _c.limit) !== null && _d !== void 0 ? _d : '-'}</strong></li>
-      <li>Queue<strong>${(_f = (_e = w.slots) === null || _e === void 0 ? void 0 : _e.queue) !== null && _f !== void 0 ? _f : '-'}</strong></li>
+      <li>Slots<strong>${escapeHtml((_b = (_a = w.slots) === null || _a === void 0 ? void 0 : _a.used) !== null && _b !== void 0 ? _b : '-')}/${escapeHtml((_d = (_c = w.slots) === null || _c === void 0 ? void 0 : _c.limit) !== null && _d !== void 0 ? _d : '-')}</strong></li>
+      <li>Queue<strong>${escapeHtml((_f = (_e = w.slots) === null || _e === void 0 ? void 0 : _e.queue) !== null && _f !== void 0 ? _f : '-')}</strong></li>
       <li>CPU<strong>${w.system && typeof w.system.cpuLoad === 'number' ? Math.round(w.system.cpuLoad * 100) + '%' : '-'}</strong></li>
       <li>Memory<strong>${w.system && typeof w.system.usedMemoryPercent === 'number' ? Math.round(w.system.usedMemoryPercent) + '%' : '-'}</strong></li>
       </ul>
@@ -214,6 +222,7 @@ function updatePauseButton() {
         btn.className = refreshPaused ? 'paused' : '';
     }
 }
+;
 window.pauseRefresh = pauseRefresh;
 window.resumeRefresh = resumeRefresh;
 window.toggleRefresh = toggleRefresh;
@@ -232,11 +241,61 @@ function refreshDashboard() {
     return __awaiter(this, void 0, void 0, function* () {
         if (refreshPaused)
             return;
-        const workers = yield fetchWorkers();
-        renderWorkersList(workers);
+        yield Promise.allSettled([fetchWorkers().then(renderWorkersList), refreshMcpPanel()]);
     });
 }
 window.onload = () => __awaiter(void 0, void 0, void 0, function* () {
     yield refreshDashboard();
     refreshInterval = setInterval(refreshDashboard, 1000);
 });
+let mcpRequestRunning = false;
+let previousMcpView = '';
+function refreshMcpPanel() {
+    return __awaiter(this, void 0, void 0, function* () {
+        if (mcpRequestRunning)
+            return;
+        mcpRequestRunning = true;
+        const notice = document.getElementById('mcp-notice');
+        try {
+            const response = yield fetch('/dashboard/api/mcp', { cache: 'no-store' });
+            if (!response.ok)
+                throw new Error('Unable to load MCP status');
+            const status = yield response.json();
+            const details = document.getElementById('mcp-details');
+            notice.textContent = '';
+            const snapshot = JSON.stringify(status);
+            if (snapshot === previousMcpView)
+                return;
+            previousMcpView = snapshot;
+            const endpoint = new URL(status.endpoint, location.origin).href;
+            details.innerHTML = `
+      <div class="mcp-overview">
+        <span class="mcp-badge ${status.enabled ? 'enabled' : ''}">${status.enabled ? 'Enabled' : 'Disabled'}</span>
+        <code>${escapeHtml(endpoint)}</code>
+        <button id="mcp-copy-endpoint" type="button">Copy endpoint</button>
+      </div>
+      <p>${escapeHtml(status.transport)} · Bearer token · ${status.toolCount} tools · Synchronous calls</p>
+      <div class="mcp-tools">${status.tools.length
+                ? status.tools
+                    .map(tool => `<span class="mcp-tool ${tool.available ? '' : 'unavailable'}">${escapeHtml(tool.title)} · ${tool.available ? 'Ready' : 'Unavailable'}</span>`)
+                    .join('')
+                : '<span>No tools are currently exposed.</span>'}</div>
+    `;
+            document.getElementById('mcp-copy-endpoint').onclick = () => __awaiter(this, void 0, void 0, function* () {
+                try {
+                    yield navigator.clipboard.writeText(endpoint);
+                    notice.textContent = 'Endpoint copied.';
+                }
+                catch (_a) {
+                    notice.textContent = 'Select and copy the endpoint shown above.';
+                }
+            });
+        }
+        catch (_a) {
+            notice.textContent = 'Unable to refresh MCP status. The displayed information may be out of date.';
+        }
+        finally {
+            mcpRequestRunning = false;
+        }
+    });
+}

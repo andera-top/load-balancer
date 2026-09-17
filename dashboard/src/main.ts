@@ -1,3 +1,7 @@
+function escapeHtml(value: unknown): string {
+  return String(value ?? '').replace(/[&<>"']/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[char]!)
+}
+
 type DashboardWorker = {
   url: string
   group?: string
@@ -46,7 +50,7 @@ function closeDrawer() {
 
 async function openDrawer(worker: DashboardWorker) {
   selectedWorker = worker
-  const encodedUrl = btoa(worker.url)
+  const encodedUrl = btoa(worker.url).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '')
   workerLogs = 'Loading...'
   renderDrawer()
   const drawer = document.getElementById('worker-drawer')
@@ -98,18 +102,18 @@ function renderDrawer() {
     content.innerHTML = `
       <button class="drawer-close" onclick="window.closeDrawer()">×</button>
       <div class="drawer-section terminal-section">
-        <h3>Contract (V${selectedWorker.contract || '?'})</h3>
-        <pre>${selectedWorker.functions ? JSON.stringify(selectedWorker.functions, null, 2) : '-'}</pre>
+        <h3>Contract (V${escapeHtml(selectedWorker.contract || '?')})</h3>
+        <pre>${escapeHtml(selectedWorker.functions ? JSON.stringify(selectedWorker.functions, null, 2) : '-')}</pre>
       </div>
       <div class="drawer-section terminal-section">
         <h3>Logs</h3>
-        <pre>${
+        <pre>${escapeHtml(
           Array.isArray(workerLogs)
             ? workerLogs.join('\n').trim()
             : typeof workerLogs === 'string'
               ? workerLogs.replace(/\\n|\\r\\n/g, '\n').trim()
               : workerLogs
-        }</pre>
+        )}</pre>
       </div>
     `
   }
@@ -136,32 +140,36 @@ function renderWorkersList(workers: DashboardWorker[]): void {
     } else if (w.tags && typeof w.tags === 'object') {
       tags = Object.entries(w.tags).map(([name, value]) => ({ name, value: String(value) }))
     }
-    const urlObj = new URL(w.url)
-    const httpUrl = `${urlObj.protocol}//${urlObj.hostname}${urlObj.port ? ':' + urlObj.port : ''}`
-    const wsProtocol = urlObj.protocol === 'https:' ? 'wss:' : 'ws:'
-    const wsPort = w.websocketPort || urlObj.port
-    const wsUrl = `${wsProtocol}//${urlObj.hostname}${wsPort ? ':' + wsPort : ''}`
-    html += `<li class="worker-item" data-url="${encodeURIComponent(w.url)}">
+    let httpUrl = w.url
+    let wsUrl = '-'
+    try {
+      const urlObj = new URL(w.url)
+      httpUrl = `${urlObj.protocol}//${urlObj.hostname}${urlObj.port ? ':' + urlObj.port : ''}`
+      const wsProtocol = urlObj.protocol === 'https:' ? 'wss:' : 'ws:'
+      const wsPort = w.websocketPort || urlObj.port
+      wsUrl = `${wsProtocol}//${urlObj.hostname}${wsPort ? ':' + wsPort : ''}`
+    } catch {}
+    html += `<li class="worker-item" data-url="${escapeHtml(encodeURIComponent(w.url))}">
       <div class="worker-header">
-        <h2><span class="group ${getStatusClass(w)}">${w.group || '-'}</span><span class="version">(V${w.contract || '?'})</span></h2>
+        <h2><span class="group ${getStatusClass(w)}">${escapeHtml(w.group || '-')}</span><span class="version">(V${escapeHtml(w.contract || '?')})</span></h2>
         <div class="worker-urls">
-          <div>Host: <span class="worker-url" title="${w.url}">${httpUrl}</span></div>
-          <div>WebSockets: <span class="worker-ws-url">${wsUrl}</span></div>
+          <div>Host: <span class="worker-url" title="${escapeHtml(w.url)}">${escapeHtml(httpUrl)}</span></div>
+          <div>WebSockets: <span class="worker-ws-url">${escapeHtml(wsUrl)}</span></div>
         </div>
       </div>`
     if (tags.length) {
       html += `<div class="worker-tags">
-        ${tags.map(t => `<span class='worker-tag'>${t.name}${t.value ? ': ' + t.value : ''}</span>`).join('')}
+        ${tags.map(t => `<span class='worker-tag'>${escapeHtml(t.name)}${escapeHtml(t.value ? ': ' + t.value : '')}</span>`).join('')}
       </div>`
     }
     if (Array.isArray((w as any).services) && (w as any).services.length > 0) {
       html += `<div class="worker-services">
-        ${((w as any).services as any[]).map(s => `<span class="worker-service"><span style="display:inline-block;width:10px;height:10px;border-radius:50%;margin-right:6px;vertical-align:middle;background:${s.state === 'up' ? '#40b08c' : '#b3243e'}"></span>${s.name}</span>`).join('')}
+        ${((w as any).services as any[]).map(s => `<span class="worker-service"><span style="display:inline-block;width:10px;height:10px;border-radius:50%;margin-right:6px;vertical-align:middle;background:${s.state === 'up' ? '#40b08c' : '#b3243e'}"></span>${escapeHtml(s.name)}</span>`).join('')}
       </div>`
     }
     html += `<ul class="worker-stats">
-      <li>Slots<strong>${w.slots?.used ?? '-'}/${w.slots?.limit ?? '-'}</strong></li>
-      <li>Queue<strong>${w.slots?.queue ?? '-'}</strong></li>
+      <li>Slots<strong>${escapeHtml(w.slots?.used ?? '-')}/${escapeHtml(w.slots?.limit ?? '-')}</strong></li>
+      <li>Queue<strong>${escapeHtml(w.slots?.queue ?? '-')}</strong></li>
       <li>CPU<strong>${w.system && typeof w.system.cpuLoad === 'number' ? Math.round(w.system.cpuLoad * 100) + '%' : '-'}</strong></li>
       <li>Memory<strong>${w.system && typeof w.system.usedMemoryPercent === 'number' ? Math.round(w.system.usedMemoryPercent) + '%' : '-'}</strong></li>
       </ul>
@@ -214,9 +222,9 @@ function updatePauseButton() {
   }
 }
 
-window.pauseRefresh = pauseRefresh
-window.resumeRefresh = resumeRefresh
-window.toggleRefresh = toggleRefresh
+;(window as any).pauseRefresh = pauseRefresh
+;(window as any).resumeRefresh = resumeRefresh
+;(window as any).toggleRefresh = toggleRefresh
 
 window.addEventListener('DOMContentLoaded', () => {
   const header = document.querySelector('header')
@@ -232,11 +240,68 @@ window.addEventListener('DOMContentLoaded', () => {
 
 async function refreshDashboard() {
   if (refreshPaused) return
-  const workers = await fetchWorkers()
-  renderWorkersList(workers)
+  await Promise.allSettled([fetchWorkers().then(renderWorkersList), refreshMcpPanel()])
 }
 
 window.onload = async () => {
   await refreshDashboard()
   refreshInterval = setInterval(refreshDashboard, 1000) as any
+}
+
+type McpStatus = {
+  enabled: boolean
+  endpoint: string
+  transport: string
+  toolCount: number
+  tools: { title: string; available: boolean }[]
+}
+
+let mcpRequestRunning = false
+let previousMcpView = ''
+
+async function refreshMcpPanel() {
+  if (mcpRequestRunning) return
+  mcpRequestRunning = true
+  const notice = document.getElementById('mcp-notice')!
+  try {
+    const response = await fetch('/dashboard/api/mcp', { cache: 'no-store' })
+    if (!response.ok) throw new Error('Unable to load MCP status')
+    const status: McpStatus = await response.json()
+    const details = document.getElementById('mcp-details')!
+    notice.textContent = ''
+    const snapshot = JSON.stringify(status)
+    if (snapshot === previousMcpView) return
+    previousMcpView = snapshot
+    const endpoint = new URL(status.endpoint, location.origin).href
+    details.innerHTML = `
+      <div class="mcp-overview">
+        <span class="mcp-badge ${status.enabled ? 'enabled' : ''}">${status.enabled ? 'Enabled' : 'Disabled'}</span>
+        <code>${escapeHtml(endpoint)}</code>
+        <button id="mcp-copy-endpoint" type="button">Copy endpoint</button>
+      </div>
+      <p>${escapeHtml(status.transport)} · Bearer token · ${status.toolCount} tools · Synchronous calls</p>
+      <div class="mcp-tools">${
+        status.tools.length
+          ? status.tools
+              .map(
+                tool =>
+                  `<span class="mcp-tool ${tool.available ? '' : 'unavailable'}">${escapeHtml(tool.title)} · ${tool.available ? 'Ready' : 'Unavailable'}</span>`
+              )
+              .join('')
+          : '<span>No tools are currently exposed.</span>'
+      }</div>
+    `
+    document.getElementById('mcp-copy-endpoint')!.onclick = async () => {
+      try {
+        await navigator.clipboard.writeText(endpoint)
+        notice.textContent = 'Endpoint copied.'
+      } catch {
+        notice.textContent = 'Select and copy the endpoint shown above.'
+      }
+    }
+  } catch {
+    notice.textContent = 'Unable to refresh MCP status. The displayed information may be out of date.'
+  } finally {
+    mcpRequestRunning = false
+  }
 }

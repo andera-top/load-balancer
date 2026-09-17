@@ -3,10 +3,12 @@ npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 dist
+.git
 .DS_Store
 .vscode
 .env
+.mcp
 *.log
 Thumbs.db
 .npm/
-*.d.ts 
+*.d.ts

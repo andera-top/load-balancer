@@ -1,7 +1,6 @@
 import express from 'express'
 import compression from 'compression'
 import { config } from './config'
-import { Queue } from 'bullmq'
 import { log } from './utils/logger'
 import healthController from './controllers/healthController'
 import taskController from './controllers/taskController'
@@ -15,11 +14,23 @@ import { serverAdapter as bullBoardAdapter } from './utils/taskQueue'
 import path from 'path'
 import chokidar from 'chokidar'
 import { startTaskWorker } from './utils/taskProcessor'
+import { getDiscoveredWorkers } from './utils/workerManager'
+import { addTaskAndWait } from './utils/taskQueue'
+import { createBalancerMcp } from './mcp/runtime'
+import { setMcpStatus } from './mcp/state'
+import { WORKERS_PATH } from './config/workers'
 
 const app = express()
 
 app.use(compression())
-app.use(express.json({ limit: config.requestBodyLimit }))
+const mcp = createBalancerMcp({
+  root: path.resolve(__dirname, '..'),
+  workers: getDiscoveredWorkers,
+  dispatch: (payload, opts) => addTaskAndWait(payload, { ...opts, timeout: config.taskTimeout }),
+  report: message => log('[MCP]', message),
+})
+setMcpStatus(mcp.status)
+app.use('/mcp', mcp.router)
 
 if (config.dashboardEnabled) {
   app.use('/dashboard', express.static(path.join(__dirname, '../dashboard/dist')))
@@ -27,13 +38,6 @@ if (config.dashboardEnabled) {
 }
 
 app.use('/assets', express.static(path.join(__dirname, '../assets')))
-
-export const taskQueue = new Queue('tasks', {
-  connection: {
-    host: config.bullmq.redisHost,
-    port: config.bullmq.redisPort,
-  },
-})
 
 function mountControllers(app: express.Application) {
   app.use(defaultController)
@@ -60,18 +64,19 @@ app.listen(config.port, () => {
     connectAllWorkersWebsockets()
   }, config.workerDiscoveryInterval)
 
-  const workersPath = path.resolve(__dirname, '../../workers.json')
-  chokidar.watch(workersPath).on('change', async () => {
+  chokidar.watch(WORKERS_PATH, { ignoreInitial: true, atomic: true }).on('all', async event => {
+    if (!['add', 'change', 'unlink'].includes(event)) return
     log('[LB]', 'workers.json changed, hot reloading workers...')
     await discoverWorkers()
     connectAllWorkersWebsockets()
   })
 })
 
-app.use((err: any, req: express.Request, res: express.Response, next: express.NextFunction) => {
-  log('[LB]', 'Unhandled error (détail):', typeof err, err, JSON.stringify(err), err && err.stack)
+app.use((err: any, _req: express.Request, res: express.Response, next: express.NextFunction) => {
+  log('[LB]', 'Unhandled request error')
   if (res.headersSent) {
     return next(err)
   }
-  res.status(500).json({ error: 'Internal server error' })
+  const status = err?.type === 'entity.too.large' ? 413 : err instanceof SyntaxError && 'body' in err ? 400 : 500
+  res.status(status).json({ error: status < 500 ? 'Invalid request' : 'Internal server error' })
 })

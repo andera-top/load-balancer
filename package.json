@@ -1,11 +1,12 @@
 {
   "name": "@andera-top/load-balancer",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "main": "dist/app.js",
   "scripts": {
+    "test": "npm run build && node --test test/*.test.cjs",
     "dev": "concurrently \"npm run watch-dashboard\" \"nodemon src/app.ts\"",
     "build": "tsc",
-    "lint": "prettier --write --check \"**/*.{ts,tsx}\"",
+    "lint": "prettier --check \"**/*.{ts,tsx}\"",
     "dashboard:build": "npm run dashboard:build:css && npm run dashboard:build:ts && npm run dashboard:copy:html",
     "dashboard:build:css": "sass dashboard/src/main.scss dashboard/dist/main.css --style=compressed --no-source-map && postcss dashboard/dist/main.css -o dashboard/dist/main.css",
     "dashboard:build:ts": "tsc --project dashboard/tsconfig.json",
@@ -13,6 +14,9 @@
     "watch-dashboard": "chokidar 'dashboard/src/**/*' -c 'npm run dashboard:build'"
   },
   "license": "Elastic License 2.0",
+  "engines": {
+    "node": ">=18.14.1"
+  },
   "devDependencies": {
     "@types/axios": "^0.9.36",
     "@types/compression": "^1.7.5",
@@ -34,19 +38,22 @@
   "dependencies": {
     "@bull-board/api": "^7.1.5",
     "@bull-board/express": "^7.1.5",
+    "@hono/node-server": "1.19.17",
+    "@modelcontextprotocol/sdk": "^1.30.0",
     "axios": "^1.16.1",
     "bullmq": "^5.77.4",
     "chalk": "^4.1.2",
     "chokidar": "^4.0.3",
     "compression": "^1.8.1",
     "dotenv": "^16.3.1",
-    "express": "^4.22.2",
+    "express": "^4.22.3",
     "uuid": "^11.1.1",
     "ws": "^8.21.0"
   },
   "nodemonConfig": {
     "ignore": [
-      "workers.json"
+      "workers.json",
+      "mcp.json"
     ]
   }
 }

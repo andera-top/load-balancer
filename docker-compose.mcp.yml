@@ -1,0 +1,12 @@
+# Optional: docker compose -f docker-compose.yml -f docker-compose.mcp.yml up --build
+# First copy mcp.example.json to .mcp/mcp.json and configure .env.
+services:
+  andera-load-balancer:
+    env_file:
+      - .env
+    environment:
+      MCP_AUTH_KEY: ${MCP_AUTH_KEY:-}
+      MCP_CONFIG_PATH: /app/mcp/mcp.json
+      MCP_ALLOWED_ORIGINS: ${MCP_ALLOWED_ORIGINS:-}
+    volumes:
+      - ./.mcp:/app/mcp:ro

@@ -3,6 +3,7 @@ import { config } from '../config'
 import { requireAuth } from '../middleware/auth'
 import { getDiscoveredWorkers, getInvalidWorkers } from '../utils/workerManager'
 import { taskQueue } from '../utils/taskQueue'
+import { getMcpStatus } from '../mcp/state'
 
 const router = Router()
 
@@ -44,6 +45,7 @@ router.get('/health', requireAuth(), async (req: Request, res: Response) => {
     status,
     workers: getDiscoveredWorkers(),
     invalidWorkers: getInvalidWorkers(),
+    mcp: getMcpStatus(),
     services: {
       redis: redisReady ? 'ready' : 'unreachable',
       bullmq: bullmqReady ? 'ready' : 'unreachable',

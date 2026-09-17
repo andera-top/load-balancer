@@ -1,0 +1,10 @@
+{
+  "targets": [
+    {
+      "group": "default",
+      "contract": 1,
+      "workerAuthKeyEnv": "DEFAULT_WORKER_AUTH_KEY",
+      "functions": ["hello"]
+    }
+  ]
+}
