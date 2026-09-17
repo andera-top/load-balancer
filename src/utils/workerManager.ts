@@ -3,6 +3,7 @@ import { loadWorkersConfig, WorkerUrl } from '../config/workers'
 import { config } from '../config'
 import { log, warn } from './logger'
 import { updateWorkerConcurrency } from './taskProcessor'
+import { contractSignature } from './workerContracts'
 
 export type DiscoveredWorker = {
   url: string
@@ -20,7 +21,7 @@ export type DiscoveredWorker = {
     cpuLoad: number
     usedMemoryPercent: number
   }
-  functions?: { name: string; params: any }[]
+  functions?: { name: string; description?: string; params: any; config?: { supportsStreaming?: boolean } }[]
   contractValid?: boolean
   contractMismatchReason?: string
   tags?: string[]
@@ -30,6 +31,7 @@ export type DiscoveredWorker = {
 let workers: DiscoveredWorker[] = []
 let previousWorkers: DiscoveredWorker[] = []
 let localSlots: Record<string, number> = {}
+let discoveryPromise: Promise<void> | null = null
 
 function workerKey(w: DiscoveredWorker) {
   return w.url
@@ -37,10 +39,6 @@ function workerKey(w: DiscoveredWorker) {
 
 function findWorker(arr: DiscoveredWorker[], url: string) {
   return arr.find(w => w.url === url)
-}
-
-function deepEqual(a: any, b: any): boolean {
-  return JSON.stringify(a) === JSON.stringify(b)
 }
 
 function validateWorkerContracts(workers: DiscoveredWorker[]) {
@@ -57,7 +55,7 @@ function validateWorkerContracts(workers: DiscoveredWorker[]) {
     const ref = groupWorkers[0].functions
     for (const w of groupWorkers) {
       const wasValid = w.contractValid !== false
-      if (!deepEqual(w.functions, ref)) {
+      if (contractSignature(w.functions) !== contractSignature(ref)) {
         w.contractValid = false
         w.contractMismatchReason = 'Contract mismatch (functions/params)'
         if (wasValid) {
@@ -91,29 +89,30 @@ async function getHealthWithRetry(url: string, retries: number, timeout: number)
   throw lastErr
 }
 
-export async function discoverWorkers() {
+async function runDiscovery() {
   const baseWorkers = loadWorkersConfig()
   const uniqueUrls = Array.from(new Set(baseWorkers))
-  const discovered: DiscoveredWorker[] = []
-  for (const url of uniqueUrls) {
-    try {
-      const data = await getHealthWithRetry(url, config.workerDiscoveryRetries, config.workerDiscoveryTimeout)
-      discovered.push({
-        url,
-        websocketPort: data.websocketPort,
-        group: data.group,
-        contract: data.contract,
-        status: data.status,
-        slots: data.slots,
-        system: data.system,
-        functions: data.functions,
-        tags: data.tags,
-        services: data.services,
-      })
-    } catch (err: any) {
-      discovered.push({ url, status: 'unreachable' })
-    }
-  }
+  const discovered: DiscoveredWorker[] = await Promise.all(
+    uniqueUrls.map(async url => {
+      try {
+        const data = await getHealthWithRetry(url, config.workerDiscoveryRetries, config.workerDiscoveryTimeout)
+        return {
+          url,
+          websocketPort: data.websocketPort,
+          group: data.group,
+          contract: data.contract,
+          status: data.status,
+          slots: data.slots,
+          system: data.system,
+          functions: data.functions,
+          tags: data.tags,
+          services: data.services,
+        }
+      } catch {
+        return { url, status: 'unreachable' }
+      }
+    })
+  )
 
   for (const w of discovered) {
     if (!findWorker(previousWorkers, w.url)) {
@@ -152,8 +151,23 @@ export async function discoverWorkers() {
 
   previousWorkers = discovered
   workers = discovered
+  const currentUrls = new Set(workers.map(worker => worker.url))
+  for (const url of Object.keys(localSlots)) if (!currentUrls.has(url)) delete localSlots[url]
+  for (const worker of workers) {
+    if (localSlots[worker.url] === undefined && typeof worker.slots?.available === 'number') {
+      localSlots[worker.url] = worker.slots.available
+    }
+  }
   validateWorkerContracts(workers)
   updateWorkerConcurrency()
+}
+
+export function discoverWorkers(): Promise<void> {
+  if (discoveryPromise) return discoveryPromise
+  discoveryPromise = runDiscovery().finally(() => {
+    discoveryPromise = null
+  })
+  return discoveryPromise
 }
 
 export function getDiscoveredWorkers(): DiscoveredWorker[] {
@@ -177,7 +191,8 @@ export function reserveSlot(url: string): boolean {
 
 export function releaseSlot(url: string) {
   if (localSlots[url] === undefined) return
-  localSlots[url]++
+  const limit = workers.find(worker => worker.url === url)?.slots?.limit
+  localSlots[url] = typeof limit === 'number' ? Math.min(localSlots[url] + 1, limit) : localSlots[url] + 1
 }
 
 export function updateWorkerStatus(url: string, status?: string, slots?: any, system?: { cpuLoad: number; usedMemoryPercent: number }) {
@@ -195,7 +210,7 @@ export function updateWorkerStatus(url: string, status?: string, slots?: any, sy
   }
 }
 
-export function selectBestWorker({ group, contract, function: fnName }: { group: string; contract: number; function: string }) {
+export function selectBestWorker({ group, contract, function: fnName, mode }: { group: string; contract: number; function: string; mode?: string }) {
   const candidates = getDiscoveredWorkers().filter(
     w =>
       w.status === 'ready' &&
@@ -204,7 +219,9 @@ export function selectBestWorker({ group, contract, function: fnName }: { group:
       w.slots &&
       (localSlots[w.url] ?? w.slots.available) > 0 &&
       w.functions &&
-      w.functions.some(f => f.name === fnName) &&
+      // Older Workers do not publish this capability. Preserve rolling-upgrade
+      // compatibility, while excluding new Workers that explicitly say false.
+      w.functions.some(f => f.name === fnName && (mode !== 'stream' || f.config?.supportsStreaming !== false)) &&
       (!w.services || w.services.length === 0 || w.services.every((s: any) => s.state === 'up'))
   )
   if (candidates.length === 0) return null

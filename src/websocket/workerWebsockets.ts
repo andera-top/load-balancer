@@ -39,9 +39,10 @@ export function connectAllWorkersWebsockets() {
     let heartbeatTimeout: NodeJS.Timeout | null = null
 
     function sendPing() {
-      if (ws.readyState === WebSocket.OPEN) {
+      if (ws.readyState === WebSocket.OPEN && !heartbeatTimeout) {
         ws.send('ping')
         heartbeatTimeout = setTimeout(() => {
+          heartbeatTimeout = null
           warn('[LB]', `No pong from ${worker.url}, closing WS and marking offline`)
           updateWorkerStatus(worker.url, 'offline')
           ws.terminate()
@@ -57,6 +58,14 @@ export function connectAllWorkersWebsockets() {
       sendPing()
     })
     ws.on('close', () => {
+      if (heartbeats[worker.url]) {
+        clearInterval(heartbeats[worker.url])
+        delete heartbeats[worker.url]
+      }
+      if (heartbeatTimeout) {
+        clearTimeout(heartbeatTimeout)
+        heartbeatTimeout = null
+      }
       if (manuallyClosed.has(worker.url)) {
         manuallyClosed.delete(worker.url)
         return
@@ -64,8 +73,6 @@ export function connectAllWorkersWebsockets() {
       warn('[LB]', `WebSocket closed for ${wsUrl}, will retry`)
       updateWorkerStatus(worker.url, 'offline')
       delete sockets[worker.url]
-      if (heartbeats[worker.url]) clearInterval(heartbeats[worker.url])
-      if (heartbeatTimeout) clearTimeout(heartbeatTimeout)
       setTimeout(() => connectAllWorkersWebsockets(), 2000)
     })
     ws.on('error', err => warn('[LB]', `WebSocket error for ${wsUrl}:`, err.message))
@@ -78,7 +85,10 @@ export function connectAllWorkersWebsockets() {
         if (worker.status !== prevStatus || JSON.stringify(worker.slots) !== prevSlots) {
           log('[LB]', `Worker ${worker.url} updated via WS: status=${data.status}, slots=${JSON.stringify(data.slots)}`)
         }
-        if (heartbeatTimeout) clearTimeout(heartbeatTimeout)
+        if (heartbeatTimeout) {
+          clearTimeout(heartbeatTimeout)
+          heartbeatTimeout = null
+        }
       } catch (err) {
         const error = err as Error
         warn('[LB]', `Invalid WS message from ${worker.url}:`, error.message)

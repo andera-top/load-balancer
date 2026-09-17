@@ -12,10 +12,10 @@ const taskQueue = new Queue('tasks', {
   },
 })
 
-const pendingTasks: Record<string, { resolve: (result: any) => void; reject: (err: any) => void }> = {}
+const pendingTasks: Record<string, { resolve: (result: any) => boolean; reject: (err: any) => boolean }> = {}
 const authKeyMap = new Map<string, string>()
 
-export async function addTaskAndWait(payload: any, opts: { priority?: number; timeout?: number; authorization?: string } = {}) {
+export async function addTaskAndWait(payload: any, opts: { priority?: number; timeout?: number; authorization?: string; attempts?: number } = {}) {
   const taskId = uuidv4()
   const timeoutMs = opts.timeout || 60000
   if (opts.authorization) {
@@ -28,14 +28,18 @@ export async function addTaskAndWait(payload: any, opts: { priority?: number; ti
     }, timeoutMs)
     pendingTasks[taskId] = {
       resolve: result => {
+        if (!pendingTasks[taskId]) return false
         clearTimeout(timer)
         clearPendingTask(taskId)
         resolve(result)
+        return true
       },
       reject: err => {
+        if (!pendingTasks[taskId]) return false
         clearTimeout(timer)
         clearPendingTask(taskId)
         reject(err)
+        return true
       },
     }
     taskQueue
@@ -44,12 +48,12 @@ export async function addTaskAndWait(payload: any, opts: { priority?: number; ti
         { ...payload, _taskId: taskId },
         {
           priority: opts.priority,
-          attempts: config.taskAttempts,
+          attempts: opts.attempts ?? config.taskAttempts,
           removeOnComplete: { age: 86400 },
           removeOnFail: { age: 86400 },
         }
       )
-      .catch(reject)
+      .catch(err => pendingTasks[taskId]?.reject(err))
   })
 }
 
@@ -59,6 +63,7 @@ export function getPendingTaskResolver(taskId: string) {
 
 export function clearPendingTask(taskId: string) {
   delete pendingTasks[taskId]
+  authKeyMap.delete(taskId)
 }
 
 export { taskQueue, serverAdapter, authKeyMap }

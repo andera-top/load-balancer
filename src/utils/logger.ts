@@ -44,19 +44,19 @@ function writeLog(level: string, args: any[]) {
     '[WEBSOKET]': chalk.hex('#0091EA'),
   }
 
-  let msg = args.map(stringify).join(' ')
-  let coloredMsg = msg.replace(/(\[[A-Z]+\])/, match => {
+  const msg = args.map(stringify).join(' ')
+  const coloredMsg = msg.replace(/(\[[A-Z]+\])/, match => {
     return prefixColors[match] ? prefixColors[match](match) : chalk.hex('#CCCCCC')(match)
   })
-  const line = `[${timestamp}] [${level}] ${coloredMsg}`
+  const line = `[${timestamp}] [${level}] ${msg}`
   logs.push(line)
   if (logs.length > MAX_LOGS) logs.shift()
 
-  let coloredLine = line
-  if (level === 'INFO') coloredLine = chalk.blue(line)
-  if (level === 'WARN') coloredLine = chalk.yellow(line)
-  if (level === 'ERROR') coloredLine = chalk.red(line)
-  if (level === 'DEBUG') coloredLine = chalk.gray(line)
+  let coloredLine = `[${timestamp}] [${level}] ${coloredMsg}`
+  if (level === 'INFO') coloredLine = chalk.blue(coloredLine)
+  if (level === 'WARN') coloredLine = chalk.yellow(coloredLine)
+  if (level === 'ERROR') coloredLine = chalk.red(coloredLine)
+  if (level === 'DEBUG') coloredLine = chalk.gray(coloredLine)
   console.log(coloredLine)
 }
 
