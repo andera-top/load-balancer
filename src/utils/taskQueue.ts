@@ -4,6 +4,7 @@ import { v4 as uuidv4 } from 'uuid'
 import { ExpressAdapter } from '@bull-board/express'
 import { createBullBoard } from '@bull-board/api'
 import { BullMQAdapter } from '@bull-board/api/bullMQAdapter'
+import { error } from './logger'
 
 const taskQueue = new Queue('tasks', {
   connection: {
@@ -11,6 +12,7 @@ const taskQueue = new Queue('tasks', {
     port: config.bullmq.redisPort,
   },
 })
+taskQueue.on('error', () => error('[LB]', 'Queue connection error'))
 
 const pendingTasks: Record<string, { resolve: (result: any) => boolean; reject: (err: any) => boolean }> = {}
 const authKeyMap = new Map<string, string>()

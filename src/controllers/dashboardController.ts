@@ -35,6 +35,7 @@ router.get('/api/workers/:encodedUrl/logs', async (req: Request, res: Response) 
     const resp = await axios.get(url.endsWith('/') ? url + 'logs' : url + '/logs', {
       headers: { 'x-lb-auth': config.lbAuthKey },
       timeout: config.workerDiscoveryTimeout,
+      maxRedirects: 0,
     })
     res.json(resp.data)
   } catch (err) {

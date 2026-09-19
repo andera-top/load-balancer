@@ -28,7 +28,7 @@ function validWebhookUrl(value: unknown): boolean {
 
 router.post('/task', requireAuth(), express.json({ limit: config.requestBodyLimit }), async (req: Request, res: Response) => {
   try {
-    const { group, function: fnName, contract, priority, mode, webhook, ...rest } = req.body
+    const { group, function: fnName, contract, priority, mode, webhook, ...rest } = req.body || {}
     if (typeof group !== 'string' || !group.trim() || group !== group.trim() || typeof fnName !== 'string' || !fnName.trim() || fnName !== fnName.trim()) {
       return res.status(400).json({ error: 'Invalid group or function' })
     }
@@ -48,7 +48,11 @@ router.post('/task', requireAuth(), express.json({ limit: config.requestBodyLimi
         !webhook ||
         typeof webhook !== 'object' ||
         !validWebhookUrl(webhook.url) ||
-        (webhook.headers !== undefined && (!webhook.headers || typeof webhook.headers !== 'object' || Array.isArray(webhook.headers)))
+        (webhook.headers !== undefined &&
+          (!webhook.headers ||
+            typeof webhook.headers !== 'object' ||
+            Array.isArray(webhook.headers) ||
+            Object.values(webhook.headers).some(value => typeof value !== 'string')))
       ) {
         return res.status(400).json({ error: 'Missing or invalid webhook.url for mode webhook' })
       }

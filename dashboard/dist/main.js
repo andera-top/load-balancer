@@ -14,6 +14,8 @@ function escapeHtml(value) {
 function fetchWorkers() {
     return __awaiter(this, void 0, void 0, function* () {
         const res = yield fetch('/dashboard/api/workers');
+        if (!res.ok)
+            throw new Error('Unable to load Workers');
         return res.json();
     });
 }
@@ -36,7 +38,8 @@ function closeDrawer() {
     if (drawer) {
         drawer.classList.remove('drawer-open');
         setTimeout(() => {
-            drawer.style.display = 'none';
+            if (!selectedWorker)
+                drawer.style.display = 'none';
         }, 350);
     }
     if (overlay)
@@ -57,12 +60,18 @@ function openDrawer(worker) {
             void drawer.offsetHeight;
             drawer.classList.add('drawer-open');
         }
-        const res = yield fetch(`/dashboard/api/workers/${encodedUrl}/logs`);
-        if (res.ok) {
+        try {
+            const res = yield fetch(`/dashboard/api/workers/${encodedUrl}/logs`);
+            if (!res.ok)
+                throw new Error('Unable to load logs');
             const data = yield res.json();
+            if (selectedWorker !== worker)
+                return;
             workerLogs = typeof data === 'string' ? data : data.logs || JSON.stringify(data, null, 2);
         }
-        else {
+        catch (_a) {
+            if (selectedWorker !== worker)
+                return;
             workerLogs = 'Failed to fetch logs.';
         }
         renderDrawer();
@@ -237,11 +246,18 @@ window.addEventListener('DOMContentLoaded', () => {
     }
     updatePauseButton();
 });
+let dashboardRequestRunning = false;
 function refreshDashboard() {
     return __awaiter(this, void 0, void 0, function* () {
-        if (refreshPaused)
+        if (refreshPaused || dashboardRequestRunning)
             return;
-        yield Promise.allSettled([fetchWorkers().then(renderWorkersList), refreshMcpPanel()]);
+        dashboardRequestRunning = true;
+        try {
+            yield Promise.allSettled([fetchWorkers().then(renderWorkersList), refreshMcpPanel()]);
+        }
+        finally {
+            dashboardRequestRunning = false;
+        }
     });
 }
 window.onload = () => __awaiter(void 0, void 0, void 0, function* () {

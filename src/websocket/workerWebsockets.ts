@@ -8,13 +8,15 @@ const HEARTBEAT_TIMEOUT = config.wsHeartbeatTimeout || 5000
 
 const sockets: Record<string, WebSocket> = {}
 const heartbeats: Record<string, NodeJS.Timeout> = {}
-const manuallyClosed = new Set<string>()
 
 export function cleanupObsoleteWebsockets() {
-  const currentUrls = new Set(getDiscoveredWorkers().map(w => w.url))
+  const currentUrls = new Set(
+    getDiscoveredWorkers()
+      .filter(w => w.websocketPort && w.status !== 'unreachable')
+      .map(w => w.url)
+  )
   for (const url of Object.keys(sockets)) {
     if (!currentUrls.has(url)) {
-      manuallyClosed.add(url)
       sockets[url].terminate()
       delete sockets[url]
       if (heartbeats[url]) {
@@ -33,16 +35,24 @@ export function connectAllWorkersWebsockets() {
     const wsUrl = buildWsUrl(worker.url, worker.websocketPort)
     if (sockets[worker.url]) continue
 
-    const ws = new WebSocket(wsUrl, config.lbAuthKey)
+    let ws: WebSocket
+    try {
+      ws = new WebSocket(wsUrl, config.lbAuthKey, { maxPayload: 2 * 1024 * 1024, handshakeTimeout: config.workerDiscoveryTimeout })
+    } catch {
+      warn('[LB]', 'Unable to create Worker WebSocket connection')
+      continue
+    }
     sockets[worker.url] = ws
 
     let heartbeatTimeout: NodeJS.Timeout | null = null
 
     function sendPing() {
+      if (sockets[worker.url] !== ws) return
       if (ws.readyState === WebSocket.OPEN && !heartbeatTimeout) {
         ws.send('ping')
         heartbeatTimeout = setTimeout(() => {
           heartbeatTimeout = null
+          if (sockets[worker.url] !== ws) return
           warn('[LB]', `No pong from ${worker.url}, closing WS and marking offline`)
           updateWorkerStatus(worker.url, 'offline')
           ws.terminate()
@@ -58,18 +68,13 @@ export function connectAllWorkersWebsockets() {
       sendPing()
     })
     ws.on('close', () => {
-      if (heartbeats[worker.url]) {
-        clearInterval(heartbeats[worker.url])
-        delete heartbeats[worker.url]
-      }
+      clearInterval(interval)
       if (heartbeatTimeout) {
         clearTimeout(heartbeatTimeout)
         heartbeatTimeout = null
       }
-      if (manuallyClosed.has(worker.url)) {
-        manuallyClosed.delete(worker.url)
-        return
-      }
+      if (sockets[worker.url] !== ws) return
+      delete heartbeats[worker.url]
       warn('[LB]', `WebSocket closed for ${wsUrl}, will retry`)
       updateWorkerStatus(worker.url, 'offline')
       delete sockets[worker.url]
@@ -77,11 +82,26 @@ export function connectAllWorkersWebsockets() {
     })
     ws.on('error', err => warn('[LB]', `WebSocket error for ${wsUrl}:`, err.message))
     ws.on('message', msg => {
+      if (sockets[worker.url] !== ws) return
       try {
         const data = JSON.parse(msg.toString())
+        if (
+          !data ||
+          typeof data !== 'object' ||
+          (data.status !== undefined && typeof data.status !== 'string') ||
+          (data.slots !== undefined &&
+            (!data.slots ||
+              !['used', 'available', 'limit'].every(key => Number.isSafeInteger(data.slots[key]) && data.slots[key] >= 0) ||
+              data.slots.limit < 1 ||
+              data.slots.available > data.slots.limit ||
+              data.slots.used > data.slots.limit)) ||
+          (data.services !== undefined && (!Array.isArray(data.services) || data.services.some((s: any) => !s || typeof s.state !== 'string')))
+        ) {
+          throw new Error('Invalid Worker status')
+        }
         const prevStatus = worker.status
         const prevSlots = JSON.stringify(worker.slots)
-        updateWorkerStatus(worker.url, data.status, data.slots, data.system)
+        updateWorkerStatus(worker.url, data.status, data.slots, data.system, data.services)
         if (worker.status !== prevStatus || JSON.stringify(worker.slots) !== prevSlots) {
           log('[LB]', `Worker ${worker.url} updated via WS: status=${data.status}, slots=${JSON.stringify(data.slots)}`)
         }

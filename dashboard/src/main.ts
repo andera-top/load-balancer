@@ -19,6 +19,7 @@ type DashboardWorker = {
 
 async function fetchWorkers(): Promise<DashboardWorker[]> {
   const res = await fetch('/dashboard/api/workers')
+  if (!res.ok) throw new Error('Unable to load Workers')
   return res.json()
 }
 
@@ -40,7 +41,7 @@ function closeDrawer() {
   if (drawer) {
     drawer.classList.remove('drawer-open')
     setTimeout(() => {
-      drawer.style.display = 'none'
+      if (!selectedWorker) drawer.style.display = 'none'
     }, 350)
   }
   if (overlay) overlay.style.display = 'none'
@@ -60,11 +61,14 @@ async function openDrawer(worker: DashboardWorker) {
     void drawer.offsetHeight
     drawer.classList.add('drawer-open')
   }
-  const res = await fetch(`/dashboard/api/workers/${encodedUrl}/logs`)
-  if (res.ok) {
+  try {
+    const res = await fetch(`/dashboard/api/workers/${encodedUrl}/logs`)
+    if (!res.ok) throw new Error('Unable to load logs')
     const data = await res.json()
+    if (selectedWorker !== worker) return
     workerLogs = typeof data === 'string' ? data : data.logs || JSON.stringify(data, null, 2)
-  } else {
+  } catch {
+    if (selectedWorker !== worker) return
     workerLogs = 'Failed to fetch logs.'
   }
   renderDrawer()
@@ -238,9 +242,15 @@ window.addEventListener('DOMContentLoaded', () => {
   updatePauseButton()
 })
 
+let dashboardRequestRunning = false
 async function refreshDashboard() {
-  if (refreshPaused) return
-  await Promise.allSettled([fetchWorkers().then(renderWorkersList), refreshMcpPanel()])
+  if (refreshPaused || dashboardRequestRunning) return
+  dashboardRequestRunning = true
+  try {
+    await Promise.allSettled([fetchWorkers().then(renderWorkersList), refreshMcpPanel()])
+  } finally {
+    dashboardRequestRunning = false
+  }
 }
 
 window.onload = async () => {

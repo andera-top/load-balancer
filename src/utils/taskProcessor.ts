@@ -1,6 +1,6 @@
-import { Worker } from 'bullmq'
+import { Worker, DelayedError } from 'bullmq'
 import { getPendingTaskResolver, authKeyMap } from './taskQueue'
-import { selectBestWorker, reserveSlot, releaseSlot, getDiscoveredWorkers } from './workerManager'
+import { selectBestWorker, reserveSlot, releaseSlot, getDiscoveredWorkers, hasMatchingWorker } from './workerManager'
 import axios from 'axios'
 import { config } from '../config'
 import { log } from './logger'
@@ -24,7 +24,7 @@ export function startTaskWorker() {
   currentConcurrency = computeTotalSlots() || 1
   worker = new Worker(
     'tasks',
-    async job => {
+    async (job, token) => {
       const payload = job.data
       const resolver = getPendingTaskResolver(payload._taskId)
       if (!resolver) {
@@ -33,9 +33,17 @@ export function startTaskWorker() {
         throw new Error('Task context is no longer available')
       }
       let selectedWorker = null
+      let reserved = false
       try {
-        selectedWorker = selectBestWorker({ group: payload.group, contract: payload.contract, function: payload.function, mode: payload.mode })
-        if (!selectedWorker || !reserveSlot(selectedWorker.url)) {
+        const selection = { group: payload.group, contract: payload.contract, function: payload.function, mode: payload.mode }
+        selectedWorker = selectBestWorker(selection)
+        reserved = !!selectedWorker && reserveSlot(selectedWorker.url)
+        if (!reserved && hasMatchingWorker(selection)) {
+          // Saturation is not an execution failure: wait without consuming retries.
+          await job.moveToDelayed(Date.now() + 100, token)
+          throw new DelayedError()
+        }
+        if (!selectedWorker || !reserved) {
           throw new Error('No available worker slot for this group/contract/function')
         }
         const url = selectedWorker.url.endsWith('/') ? selectedWorker.url + 'task' : selectedWorker.url + '/task'
@@ -57,7 +65,7 @@ export function startTaskWorker() {
             // response ends, errors, times out, or its client disconnects.
             await streamFinished
           } else {
-            const response = await axios.post(url, payload, { headers, timeout: config.taskTimeout })
+            const response = await axios.post(url, payload, { headers, timeout: config.taskTimeout, maxRedirects: 0 })
             resolver.resolve(response.data)
             authKeyMap.delete(payload._taskId)
           }
@@ -65,6 +73,7 @@ export function startTaskWorker() {
           throw err
         }
       } catch (err: any) {
+        if (err instanceof DelayedError) throw err
         // Keep the resolver for retries and settle it on the last failure.
         // Never retain Axios request configuration (including auth headers) in Redis.
         if (job.attemptsMade + 1 >= (job.opts.attempts || 1)) {
@@ -72,7 +81,7 @@ export function startTaskWorker() {
         }
         throw new Error('Worker task failed or no matching slot is available')
       } finally {
-        if (selectedWorker) releaseSlot(selectedWorker.url)
+        if (reserved && selectedWorker) releaseSlot(selectedWorker.url)
       }
     },
     {
@@ -83,6 +92,7 @@ export function startTaskWorker() {
       concurrency: currentConcurrency,
     }
   )
+  worker.on('error', () => log('[LB]', 'Task processor connection error'))
 }
 
 export function updateWorkerConcurrency() {

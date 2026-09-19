@@ -54,22 +54,28 @@ if (config.bullBoardEnabled) {
 
 app.listen(config.port, () => {
   log('[LB]', `Load Balancer ready on port ${config.port}`)
-  discoverWorkers().then(() => {
-    log('[LB]', 'Initial worker discovery complete')
-    startTaskWorker()
-    connectAllWorkersWebsockets()
-  })
-  setInterval(async () => {
-    await discoverWorkers()
-    connectAllWorkersWebsockets()
+  startTaskWorker()
+  const refresh = async () => {
+    try {
+      await discoverWorkers()
+      connectAllWorkersWebsockets()
+    } catch {
+      log('[LB]', 'Worker discovery failed; will retry')
+    }
+  }
+  void refresh()
+  setInterval(() => {
+    void refresh()
   }, config.workerDiscoveryInterval)
 
-  chokidar.watch(WORKERS_PATH, { ignoreInitial: true, atomic: true }).on('all', async event => {
-    if (!['add', 'change', 'unlink'].includes(event)) return
-    log('[LB]', 'workers.json changed, hot reloading workers...')
-    await discoverWorkers()
-    connectAllWorkersWebsockets()
-  })
+  chokidar
+    .watch(WORKERS_PATH, { ignoreInitial: true, atomic: true })
+    .on('all', async event => {
+      if (!['add', 'change', 'unlink'].includes(event)) return
+      log('[LB]', 'workers.json changed, hot reloading workers...')
+      await refresh()
+    })
+    .on('error', () => log('[LB]', 'Unable to watch workers.json'))
 })
 
 app.use((err: any, _req: express.Request, res: express.Response, next: express.NextFunction) => {

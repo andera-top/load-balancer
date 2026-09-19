@@ -60,7 +60,8 @@ test('actual LB + Redis: discovers, authenticates, dispatches and reports MCP sa
     WORKER_KEY = 'worker-integration-key',
     MCP_KEY = 'agent-integration-key'
   let requests = [],
-    fail = false
+    fail = false,
+    malformedHealth = false
   const fake = express()
   fake.use(express.json())
   wss = new WebSocketServer({ port: 0, host: '127.0.0.1' })
@@ -76,6 +77,7 @@ test('actual LB + Redis: discovers, authenticates, dispatches and reports MCP sa
   ]
   fake.get('/health', (req, res) => {
     assert.equal(req.headers['x-lb-auth'], LB_KEY)
+    if (malformedHealth) return res.json({ status: 'ready', group: 'web', contract: 1, functions: [{ name: 'bad', params: { name: null } }] })
     res.json({
       status: 'ready',
       group: 'web',
@@ -101,10 +103,25 @@ test('actual LB + Redis: discovers, authenticates, dispatches and reports MCP sa
     assert.equal(req.headers['x-lb-auth'], LB_KEY)
     res.json({ logs: ['integration log'] })
   })
+  // An idle slot in another group raises global concurrency, but must not cause
+  // a request for the saturated web group to fail or overbook its slot.
+  fake.get('/other/health', (_req, res) =>
+    res.json({
+      status: 'ready',
+      group: 'other',
+      contract: 1,
+      functions,
+      slots: { used: 0, available: 1, limit: 1 },
+      services: [],
+    })
+  )
   fakeHttp = await new Promise(resolve => {
     const server = fake.listen(0, '127.0.0.1', () => resolve(server))
   })
-  await fs.writeFile(path.join(root, 'workers.json'), JSON.stringify(['http://127.0.0.1:' + fakeHttp.address().port]))
+  await fs.writeFile(
+    path.join(root, 'workers.json'),
+    JSON.stringify(['http://127.0.0.1:' + fakeHttp.address().port, 'http://127.0.0.1:' + fakeHttp.address().port + '/other'])
+  )
   await fs.writeFile(
     path.join(root, 'mcp.json'),
     JSON.stringify({ targets: [{ group: 'web', contract: 1, workerAuthKeyEnv: 'TEST_WORKER_KEY', functions: ['hello'] }] })
@@ -137,6 +154,7 @@ test('actual LB + Redis: discovers, authenticates, dispatches and reports MCP sa
     return health.workers?.[0]?.status === 'ready' && health.mcp.tools.length === 1
   })
   await new Promise(resolve => setTimeout(resolve, 150))
+  assert.equal((await (await fetch(base + '/health')).json()).status, 'ready', 'Healthy Redis must produce a ready LB')
   assert.equal((await (await fetch(base + '/health')).json()).mcp, undefined)
   assert.equal((await (await fetch(base + '/health', { headers: auth(MCP_KEY) })).json()).mcp, undefined)
   const panelResponse = await fetch(base + '/dashboard/api/mcp')
@@ -212,4 +230,16 @@ test('actual LB + Redis: discovers, authenticates, dispatches and reports MCP sa
   assert.deepEqual((await client.listTools()).tools, [])
   assert.equal((await client.callTool({ name: tool.name, arguments: { name: 'Denied' } })).isError, true)
   assert.equal(requests.length, 4)
+  malformedHealth = true
+  await waitFor(async () => {
+    const health = await (await fetch(base + '/health', { headers: auth(LB_KEY) })).json()
+    return health.workers?.[0]?.status === 'unreachable'
+  })
+  assert.equal((await fetch(base + '/health')).status, 200, 'Malformed Worker metadata must not terminate the LB')
+  malformedHealth = false
+  await waitFor(async () => (await (await fetch(base + '/health', { headers: auth(LB_KEY) })).json()).workers?.[0]?.status === 'ready')
+  const redis = children[0]
+  redis.kill()
+  await once(redis, 'exit')
+  await waitFor(async () => (await (await fetch(base + '/health')).json()).status === 'unreachable')
 })

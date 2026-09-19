@@ -10,8 +10,9 @@ const router = Router()
 async function checkServices() {
   let redisReady = false
   try {
-    const client = await taskQueue.client
-    await client.set('healthcheck:test', '1', { EX: 5 })
+    const client = await withDeadline(taskQueue.client)
+    if (client.status !== 'ready') throw new Error('Redis unavailable')
+    await withDeadline(client.hget(taskQueue.toKey('meta'), 'version'))
     redisReady = true
   } catch {
     redisReady = false
@@ -19,7 +20,8 @@ async function checkServices() {
 
   let bullmqReady = false
   try {
-    await taskQueue.getJobCounts()
+    if (!redisReady) throw new Error('Redis unavailable')
+    await withDeadline(taskQueue.getJobCounts())
     bullmqReady = true
   } catch {
     bullmqReady = false
@@ -27,6 +29,20 @@ async function checkServices() {
 
   const status = redisReady && bullmqReady ? 'ready' : 'unreachable'
   return { status, redisReady, bullmqReady }
+}
+
+async function withDeadline<T>(operation: Promise<T>): Promise<T> {
+  let timer: NodeJS.Timeout | undefined
+  try {
+    return await Promise.race([
+      operation,
+      new Promise<never>((_, reject) => {
+        timer = setTimeout(() => reject(new Error('Health check timed out')), 1000)
+      }),
+    ])
+  } finally {
+    if (timer) clearTimeout(timer)
+  }
 }
 
 router.get('/health', async (req: Request, res: Response, next: NextFunction) => {

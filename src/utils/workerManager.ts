@@ -31,6 +31,7 @@ export type DiscoveredWorker = {
 let workers: DiscoveredWorker[] = []
 let previousWorkers: DiscoveredWorker[] = []
 let localSlots: Record<string, number> = {}
+const reservations = new Map<string, number>()
 let discoveryPromise: Promise<void> | null = null
 
 function workerKey(w: DiscoveredWorker) {
@@ -77,8 +78,12 @@ async function getHealthWithRetry(url: string, retries: number, timeout: number)
       const res = await axios.get(healthUrl, {
         headers: { 'x-lb-auth': config.lbAuthKey },
         timeout,
+        maxRedirects: 0,
+        maxContentLength: 2 * 1024 * 1024,
       })
-      return res.data
+      const data = res.data
+      validateHealth(data)
+      return data
     } catch (err) {
       lastErr = err
       if (i < retries) {
@@ -87,6 +92,39 @@ async function getHealthWithRetry(url: string, retries: number, timeout: number)
     }
   }
   throw lastErr
+}
+
+function validateHealth(data: any) {
+  if (
+    !data ||
+    typeof data !== 'object' ||
+    typeof data.group !== 'string' ||
+    !data.group.trim() ||
+    !Number.isSafeInteger(data.contract) ||
+    data.contract < 1 ||
+    typeof data.status !== 'string' ||
+    !data.slots ||
+    !['used', 'available', 'limit'].every(key => Number.isSafeInteger(data.slots[key]) && data.slots[key] >= 0) ||
+    data.slots.limit < 1 ||
+    data.slots.available > data.slots.limit ||
+    data.slots.used > data.slots.limit ||
+    !Array.isArray(data.functions) ||
+    (data.websocketPort !== undefined && (!Number.isInteger(data.websocketPort) || data.websocketPort < 1 || data.websocketPort > 65535)) ||
+    (data.services !== undefined && (!Array.isArray(data.services) || data.services.some((s: any) => !s || typeof s.state !== 'string')))
+  )
+    throw new Error('Invalid Worker health metadata')
+  const names = new Set<string>()
+  for (const fn of data.functions) {
+    if (!fn || typeof fn.name !== 'string' || !fn.name || names.has(fn.name) || !fn.params || typeof fn.params !== 'object' || Array.isArray(fn.params)) {
+      throw new Error('Invalid Worker function metadata')
+    }
+    names.add(fn.name)
+    for (const rule of Object.values(fn.params) as any[]) {
+      if (!rule || typeof rule !== 'object' || !['string', 'number', 'boolean', 'object', 'array'].includes(rule.type)) {
+        throw new Error('Invalid Worker parameter metadata')
+      }
+    }
+  }
 }
 
 async function runDiscovery() {
@@ -154,7 +192,7 @@ async function runDiscovery() {
   const currentUrls = new Set(workers.map(worker => worker.url))
   for (const url of Object.keys(localSlots)) if (!currentUrls.has(url)) delete localSlots[url]
   for (const worker of workers) {
-    if (localSlots[worker.url] === undefined && typeof worker.slots?.available === 'number') {
+    if (typeof worker.slots?.available === 'number') {
       localSlots[worker.url] = worker.slots.available
     }
   }
@@ -182,20 +220,35 @@ export function syncLocalSlots(url: string, available: number) {
   localSlots[url] = available
 }
 
+function availableSlots(url: string, limit = workers.find(worker => worker.url === url)?.slots?.limit ?? 0): number {
+  return Math.max(0, Math.min(localSlots[url] ?? 0, limit - (reservations.get(url) ?? 0)))
+}
+
 export function reserveSlot(url: string): boolean {
-  if (localSlots[url] === undefined) return false
-  if (localSlots[url] <= 0) return false
+  if (availableSlots(url) <= 0) return false
+  reservations.set(url, (reservations.get(url) ?? 0) + 1)
   localSlots[url]--
   return true
 }
 
 export function releaseSlot(url: string) {
-  if (localSlots[url] === undefined) return
-  const limit = workers.find(worker => worker.url === url)?.slots?.limit
-  localSlots[url] = typeof limit === 'number' ? Math.min(localSlots[url] + 1, limit) : localSlots[url] + 1
+  const count = reservations.get(url) ?? 0
+  if (!count) return
+  if (count <= 1) reservations.delete(url)
+  else reservations.set(url, count - 1)
+  if (localSlots[url] !== undefined) {
+    const limit = workers.find(worker => worker.url === url)?.slots?.limit ?? 0
+    localSlots[url] = Math.min(localSlots[url] + 1, limit - (reservations.get(url) ?? 0))
+  }
 }
 
-export function updateWorkerStatus(url: string, status?: string, slots?: any, system?: { cpuLoad: number; usedMemoryPercent: number }) {
+export function updateWorkerStatus(
+  url: string,
+  status?: string,
+  slots?: any,
+  system?: { cpuLoad: number; usedMemoryPercent: number },
+  services?: { state: string }[]
+) {
   const worker = workers.find(w => w.url === url)
   if (worker) {
     if (status !== undefined) worker.status = status
@@ -206,27 +259,36 @@ export function updateWorkerStatus(url: string, status?: string, slots?: any, sy
       }
     }
     if (system !== undefined) worker.system = { ...system }
+    if (services !== undefined) worker.services = services
     updateWorkerConcurrency()
   }
 }
 
-export function selectBestWorker({ group, contract, function: fnName, mode }: { group: string; contract: number; function: string; mode?: string }) {
-  const candidates = getDiscoveredWorkers().filter(
+type TaskSelection = { group: string; contract: number; function: string; mode?: string }
+function matchingWorkers({ group, contract, function: fnName, mode }: TaskSelection) {
+  return getDiscoveredWorkers().filter(
     w =>
       w.status === 'ready' &&
       w.group === group &&
       w.contract === contract &&
       w.slots &&
-      (localSlots[w.url] ?? w.slots.available) > 0 &&
       w.functions &&
       // Older Workers do not publish this capability. Preserve rolling-upgrade
       // compatibility, while excluding new Workers that explicitly say false.
       w.functions.some(f => f.name === fnName && (mode !== 'stream' || f.config?.supportsStreaming !== false)) &&
       (!w.services || w.services.length === 0 || w.services.every((s: any) => s.state === 'up'))
   )
+}
+
+export function hasMatchingWorker(selection: TaskSelection): boolean {
+  return matchingWorkers(selection).length > 0
+}
+
+export function selectBestWorker(selection: TaskSelection) {
+  const candidates = matchingWorkers(selection).filter(worker => availableSlots(worker.url, worker.slots?.limit) > 0)
   if (candidates.length === 0) return null
   function score(w: any) {
-    const slots = localSlots[w.url] ?? w.slots?.available ?? 0
+    const slots = availableSlots(w.url, w.slots?.limit)
     const cpu = w.system?.cpuLoad ?? 0
     const mem = w.system?.usedMemoryPercent ?? 0
     return slots * 10 - cpu * 5 - mem * 5
