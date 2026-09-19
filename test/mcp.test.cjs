@@ -7,7 +7,7 @@ const express = require('express')
 const { Client } = require('@modelcontextprotocol/sdk/client/index.js')
 const { StreamableHTTPClientTransport } = require('@modelcontextprotocol/sdk/client/streamableHttp.js')
 const { LiveConfig, parseWorkerConfig, parseBalancerConfig } = require('../dist/mcp/config')
-const { inputSchema, toolName } = require('../dist/mcp/schema')
+const { inputSchema, toolName, localToolName } = require('../dist/mcp/schema')
 const { dedicatedToken } = require('../dist/mcp/transport')
 const isBalancer = require('../package.json').name.includes('load-balancer')
 const createRuntime = isBalancer ? require('../dist/mcp/runtime').createBalancerMcp : require('../dist/mcp/runtime').createWorkerMcp
@@ -32,7 +32,7 @@ function settings(functions) {
   const selected = functions === undefined ? {} : { functions }
   return isBalancer ? { targets: [{ group: 'web', contract: 1, workerAuthKeyEnv: 'WORKER_KEY', ...selected }] } : selected
 }
-async function fixture(t, initial = settings()) {
+async function fixture(t, initial = settings(), options = {}) {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'andera-mcp-test-'))
   const filename = path.join(root, 'mcp.json')
   if (initial !== null) await fs.writeFile(filename, JSON.stringify(initial))
@@ -54,12 +54,12 @@ async function fixture(t, initial = settings()) {
     execute: async payload => {
       calls.push(payload)
       if (fail) throw new Error('secret: ' + WORKER_KEY)
-      return { greeting: payload.input.name }
+      return options.run ? options.run(payload) : { greeting: payload.input.name }
     },
-    dispatch: async (payload, options) => {
-      calls.push({ payload, options })
+    dispatch: async (payload, dispatchOptions) => {
+      calls.push({ payload, options: dispatchOptions })
       if (fail) throw new Error('secret: ' + WORKER_KEY)
-      return { success: true, result: { greeting: payload.input.name } }
+      return { success: true, result: options.run ? await options.run(payload) : { greeting: payload.input.name } }
     },
   })
   const app = express()
@@ -84,6 +84,7 @@ async function fixture(t, initial = settings()) {
     url,
     filename,
     calls,
+    functions,
     fail: () => {
       fail = true
     },
@@ -222,4 +223,74 @@ test('execution failures are safe and unavailable tools do not run', async t => 
   f.unavailable()
   assert.equal((await f.client.callTool({ name: tool.name, arguments: { name: 'Ada' } })).isError, true)
   assert.equal(f.calls.length, 1)
+})
+
+test('normalized local names cannot shadow literal function names', () => {
+  const normalized = localToolName('hello/world')
+  assert.notEqual(localToolName(normalized), normalized)
+  assert.equal(localToolName('hello'), 'hello')
+})
+
+test('schema cache follows definition changes and invalid schemas fail safely', async t => {
+  const f = await fixture(t, settings(['hello']))
+  await f.connect()
+  const tool = (await f.client.listTools()).tools[0]
+  assert.equal((await f.client.callTool({ name: tool.name, arguments: { name: 'Ada' } })).isError, undefined)
+  f.functions.set('hello', { ...definition, params: { name: { type: 'string', min: 5 } } })
+  assert.equal((await f.client.callTool({ name: tool.name, arguments: { name: 'Ada' } })).isError, true)
+  f.functions.set('hello', { ...definition, params: { name: { type: 'string', pattern: '[' } } })
+  const failure = await f.client.callTool({ name: tool.name, arguments: { name: 'Ada' } })
+  assert.equal(failure.isError, true)
+  assert.equal(failure.content[0].text, 'Tool schema is invalid')
+  assert.equal(f.calls.length, 1)
+})
+
+test('HTTP methods, protocol versions and body limits are enforced', async t => {
+  const f = await fixture(t)
+  const headers = { Authorization: 'Bearer ' + TOKEN, 'Content-Type': 'application/json', Accept: 'application/json, text/event-stream' }
+  assert.equal((await fetch(f.url, { headers })).status, 405)
+  assert.equal((await fetch(f.url, { method: 'DELETE', headers })).status, 405)
+  assert.equal((await fetch(f.url, { method: 'POST', headers, body: '{' })).status, 400)
+  assert.equal(
+    (
+      await fetch(f.url, {
+        method: 'POST',
+        headers: { ...headers, 'MCP-Protocol-Version': 'invalid' },
+        body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/list' }),
+      })
+    ).status,
+    400
+  )
+  assert.equal((await fetch(f.url, { method: 'POST', headers, body: JSON.stringify({ data: 'x'.repeat(1024 * 1024) }) })).status, 413)
+})
+
+test('oversized results and more than 32 in-flight calls return tool errors', { timeout: 15000 }, async t => {
+  const oversized = await fixture(t, settings(['hello']), { run: async () => 'x'.repeat(1024 * 1024) })
+  await oversized.connect()
+  const oversizedName = (await oversized.client.listTools()).tools[0].name
+  assert.equal((await oversized.client.callTool({ name: oversizedName, arguments: { name: 'Ada' } })).isError, true)
+  let release
+  const gate = new Promise(resolve => {
+    release = resolve
+  })
+  const f = await fixture(t, settings(['hello']), {
+    run: async () => {
+      await gate
+      return 'ok'
+    },
+  })
+  await f.connect()
+  const name = (await f.client.listTools()).tools[0].name
+  const calls = Array.from({ length: 32 }, () => f.client.callTool({ name, arguments: { name: 'Ada' } }))
+  try {
+    for (let i = 0; i < 200 && f.calls.length < 32; i++) await new Promise(resolve => setTimeout(resolve, 10))
+    assert.equal(f.calls.length, 32)
+    const busy = await f.client.callTool({ name, arguments: { name: 'Ada' } })
+    assert.equal(busy.isError, true)
+    assert.match(busy.content[0].text, /busy/)
+  } finally {
+    release()
+    await Promise.allSettled(calls)
+  }
+  assert.equal((await f.client.callTool({ name, arguments: { name: 'Ada' } })).isError, undefined)
 })

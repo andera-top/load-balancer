@@ -67,6 +67,7 @@ export function allows(selection: Selection, name: string): boolean {
 export class LiveConfig<T> {
   private value: T | undefined
   private raw: string | undefined
+  private fingerprint: string | undefined
   private lastError: string | null = null
   private loadedAt: string | null = null
   private watcher: ReturnType<typeof chokidar.watch>
@@ -77,20 +78,24 @@ export class LiveConfig<T> {
   ) {
     this.reload()
     this.watcher = chokidar.watch(filename, { ignoreInitial: true, persistent: false, atomic: true })
-    this.watcher.on('all', () => this.reload()).on('error', () => this.setError('Unable to watch mcp.json'))
+    this.watcher.on('all', () => this.reload(true)).on('error', () => this.setError('Unable to watch mcp.json'))
   }
   private setError(message: string) {
     if (this.lastError !== message) this.report(message)
     this.lastError = message
   }
-  reload() {
+  reload(force = false) {
     try {
-      if (fs.statSync(this.filename).size > 65536) {
+      const stat = fs.statSync(this.filename, { bigint: true })
+      const fingerprint = [stat.dev, stat.ino, stat.size, stat.mtimeNs, stat.ctimeNs].join(':')
+      if (!force && fingerprint === this.fingerprint) return
+      this.fingerprint = fingerprint
+      if (stat.size > 65536n) {
         this.raw = undefined
         throw new Error('Configuration exceeds 64 KiB')
       }
       const raw = fs.readFileSync(this.filename, 'utf8')
-      if (raw === this.raw) return
+      if (raw === this.raw && !this.lastError) return
       // Cache rejected content too, so an invalid edit does not flood logs.
       this.raw = raw
       let parsed: unknown
@@ -107,11 +112,15 @@ export class LiveConfig<T> {
       if (error.code === 'ENOENT') {
         this.value = undefined
         this.raw = undefined
+        this.fingerprint = undefined
         this.lastError = null
         this.loadedAt = null
       } else {
         // Revalidate restored content after an I/O failure, even if it is unchanged.
-        if (error.code) this.raw = undefined
+        if (error.code) {
+          this.raw = undefined
+          this.fingerprint = undefined
+        }
         // Only our validation errors are safe to expose; filesystem errors can contain paths.
         this.setError(error.code ? 'Unable to read mcp.json' : error.message)
       }

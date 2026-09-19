@@ -36,6 +36,23 @@ function toolError(message: string) {
 export function createMcpRouter(adapter: McpAdapter): express.Router {
   const router = express.Router()
   let activeCalls = 0
+  // Cache by content because each catalog refresh creates new schema objects.
+  // Rotate the provider as well as our cache to bound AJV's internal cache.
+  let validator = new AjvJsonSchemaValidator()
+  const validators = new Map<string, ReturnType<AjvJsonSchemaValidator['getValidator']>>()
+  function validate(schema: Tool['inputSchema'], args: Record<string, unknown>) {
+    const key = JSON.stringify(schema)
+    let compiled = validators.get(key)
+    if (!compiled) {
+      if (validators.size >= 128) {
+        validators.clear()
+        validator = new AjvJsonSchemaValidator()
+      }
+      compiled = validator.getValidator(schema)
+      validators.set(key, compiled)
+    }
+    return compiled(args)
+  }
   router.use((req, res, next) => {
     res.setHeader('Cache-Control', 'no-store')
     if (!adapter.enabled() || !adapter.token()) return res.status(404).json({ error: 'MCP is disabled' })
@@ -58,8 +75,7 @@ export function createMcpRouter(adapter: McpAdapter): express.Router {
   })
   router.post('/', express.json({ limit: '1mb' }), async (req, res) => {
     // Per-request server and transport: no shared session state or cached permissions.
-    const server = new Server({ name: adapter.name, version: '1.0.0' }, { capabilities: { tools: {} } })
-    const validator = new AjvJsonSchemaValidator()
+    const server = new Server({ name: adapter.name, version: '1.0.0' }, { capabilities: { tools: {} }, jsonSchemaValidator: validator })
     server.setRequestHandler(ListToolsRequestSchema, async () => ({ tools: adapter.tools().map(entry => entry.tool) }))
     server.setRequestHandler(CallToolRequestSchema, async request => {
       if (!adapter.enabled()) return toolError('MCP is disabled')
@@ -67,9 +83,15 @@ export function createMcpRouter(adapter: McpAdapter): express.Router {
       if (!entry) return toolError('Tool is not available or is no longer allowed')
       if (!entry.available) return toolError('No ready Worker is available for this tool')
       const args = request.params.arguments ?? {}
-      const result = validator.getValidator(entry.tool.inputSchema)(args)
-      if (!result.valid) return toolError('Invalid arguments: ' + result.errorMessage)
       if (activeCalls >= 32) return toolError('MCP is busy; try again later')
+      let result
+      try {
+        result = validate(entry.tool.inputSchema, args)
+      } catch {
+        adapter.report?.('MCP tool schema is invalid')
+        return toolError('Tool schema is invalid')
+      }
+      if (!result.valid) return toolError('Invalid arguments: ' + result.errorMessage)
       activeCalls++
       try {
         const output = await entry.invoke(args)

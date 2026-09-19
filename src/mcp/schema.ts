@@ -43,5 +43,8 @@ export function toolName(group: string, contract: number, name: string): string 
   return prefix + '_' + createHash('sha256').update(identity).digest('hex').slice(0, 12)
 }
 export function localToolName(name: string): string {
-  return /^[a-zA-Z0-9_.-]{1,64}$/.test(name) ? name : toolName('worker', 1, name)
+  // Reserve the normalization namespace so a literal filename cannot shadow it.
+  return /^[a-zA-Z0-9_.-]{1,64}$/.test(name) && !name.startsWith('__andera_')
+    ? name
+    : '__andera_' + createHash('sha256').update(name).digest('hex').slice(0, 55)
 }
