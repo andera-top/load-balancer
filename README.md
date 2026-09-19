@@ -4,7 +4,23 @@
 
 # Andera Load Balancer
 
-**Andera** is a high-performance, source-available Task Orchestration Platform (TOP) designed for simplicity, flexibility, and scalability.
+**Andera** is a source-available platform for exposing business functions as REST APIs and MCP tools for AI agents. Run a Worker directly or use the Load Balancer to route tasks across Workers; agents connect through one `/mcp` endpoint and one dedicated token.
+
+---
+
+## Native MCP
+
+Expose selected functions to agents at `/mcp` without another service. Set a distinct `MCP_AUTH_KEY`, copy `mcp.example.json` to `mcp.json`, and set the environment variables referenced by each target's `workerAuthKeyEnv`. Agents configure only the endpoint URL and the MCP bearer token.
+
+The configuration reloads live. Omit `functions` for all functions within a target; use an explicit list to restrict access. Missing configuration or token disables MCP. Invalid edits keep the last valid configuration; removing the file disables new access.
+
+The LB uses existing Worker REST endpoints and internal credentials. Workers do not need MCP enabled. Replicas of a group/contract must share the configured key. The optional `docker-compose.mcp.yml` mounts `.mcp/mcp.json` through a directory for atomic-save support.
+
+Authenticated `/health` shows the full MCP status, target selection, exact tool names, input schemas and sanitized reload errors. The dashboard asks for no token and shows only the endpoint, enabled state, tool titles and availability.
+
+V1 supports stateless Streamable HTTP and synchronous calls. It does not implement OAuth; ChatGPT web compatibility is therefore not promised. See [MCP documentation](https://andera.top/docs/mcp).
+
+Run `npm test` for protocol/security tests and the LB/Redis integration test (requires local `redis-server`).
 
 ---
 
@@ -12,7 +28,7 @@
 
 Andera is composed of three main components:
 
-- **Load Balancer:** Routes and prioritizes tasks, manages Worker clusters, and provides a dashboard for monitoring.
+- **Load Balancer:** Routes tasks, monitors Workers, and exposes functions across groups/contracts through one MCP endpoint.
 - **Base Worker:** Template for building your own custom Workers.
 - **Worker Core:** The core engine for all Workers.
 
@@ -28,6 +44,7 @@ The Load Balancer is the entrypoint and orchestrator for the Andera platform. It
 
 ## Features
 
+- **MCP tools:** One endpoint and agent token for selected functions across Worker groups/contracts.
 - **Task routing:** Distributes tasks to available Workers based on group, function, contract, and priority.
 - **Queue management:** Uses BullMQ for task queuing, prioritization, and retries.
 - **Dashboard:** Real-time web dashboard for monitoring Workers, tasks, and logs.
@@ -60,7 +77,7 @@ npm install
 
 ## Configuration
 
-All configuration for the Load Balancer is managed through the `.env` file.
+Runtime settings and secrets come from the environment, loaded from `.env` at startup. Worker URLs live in `workers.json`; MCP targets and function allowlists live in `mcp.json`. Both JSON configurations support live reload.
 
 ### Environment Variables
 
@@ -69,10 +86,10 @@ Below are the main environment variables used by the Load Balancer. All variable
 | Variable                    | Description                                                                                | Default  |
 | --------------------------- | ------------------------------------------------------------------------------------------ | -------- |
 | `PORT`                      | HTTP port for the Load Balancer API.                                                       | `4000`   |
-| `REDIS_HOST`                | Host for the Redis instance used by BullMQ.                                                | `redis`  |
+| `REDIS_HOST`                | Host for the Redis instance used by BullMQ.                                                | `localhost` |
 | `REDIS_PORT`                | Port for the Redis instance used by BullMQ.                                                | `6379`   |
 | `LB_AUTH_KEY`               | Authentication key for the Load Balancer and Worker communication or to use the endpoints. | Required |
-| `WORKER_DISCOVERY_INTERVAL` | Interval (ms) for polling Workers for status.                                              | `3000`   |
+| `WORKER_DISCOVERY_INTERVAL` | Interval (ms) for polling Workers for status. | `1000` |
 | `WORKER_DISCOVERY_TIMEOUT`  | Timeout (ms) for Worker discovery requests.                                                | `3000`   |
 | `WORKER_DISCOVERY_RETRIES`  | Number of retries for Worker discovery.                                                    | `10`     |
 | `WS_HEARTBEAT_INTERVAL`     | Interval (ms) for WebSocket heartbeat pings.                                               | `3000`   |
@@ -84,6 +101,12 @@ Below are the main environment variables used by the Load Balancer. All variable
 | `TASK_TIMEOUT`              | Timeout (ms) for task execution.                                                           | `300000` |
 | `TASK_ATTEMPTS`             | Number of attempts for a task before failure.                                              | `3`      |
 | `REQUEST_BODY_LIMIT`        | Maximum size of request body (supports kb, mb, gb units).                                  | `10mb`   |
+| `MCP_AUTH_KEY` | Dedicated agent token distinct from internal and target keys. | Empty: disabled |
+| `MCP_CONFIG_PATH` | MCP configuration path relative to the application root, or absolute. | `mcp.json` |
+| `MCP_ALLOWED_ORIGINS` | Comma-separated exact browser origins; native clients need none. | Empty |
+| `WORKERS_CONFIG_PATH` | Override for the Worker URL-list file. | Application-root `workers.json` |
+
+The table lists runtime defaults. The sample `.env` uses Docker's `redis` hostname, a 3000 ms discovery interval, and enables the optional dashboards. For local Redis outside Docker, set `REDIS_HOST=localhost`.
 
 ### Example `.env`
 
@@ -120,7 +143,7 @@ For advanced configuration, see the [Load Balancer Configuration Guide](https://
 ["http://localhost:3000"]
 ```
 
-> **Note:** It is strictly recommended to use HTTPS for your Workers **if they are exposed on the Internet** (this is not necessary when using the Load Balancer, which can be the only one exposed). When using HTTP, the Worker connects to the Load Balancer via `ws://`. When using HTTPS, it connects via `wss://`.
+> **Note:** It is strictly recommended to use HTTPS for your Workers **if they are exposed on the Internet** (this is not necessary when using the Load Balancer, which can be the only one exposed). The LB connects to the Worker WebSocket port using `ws://` for HTTP Worker URLs and `wss://` for HTTPS URLs. HTTPS deployments must also terminate TLS on the advertised WebSocket port.
 
 #### Docker network
 
@@ -156,7 +179,7 @@ npm run dev
 
 ```sh
 npm run build
-npm start
+node dist/app.js
 ```
 
 ### Docker setup
@@ -172,30 +195,31 @@ docker network create andera-net
 #### Build the Docker image
 
 ```sh
-docker-compose build
+docker compose build
 ```
 
 #### Run the stack (Load Balancer + Redis)
 
 ```sh
-docker-compose up
+docker compose up
 ```
 
 This will start both Redis and the Load Balancer, and automatically mount your local `workers.json` file into the container for live updates.
 
-> **Do not use `docker run` directly.** The recommended way is to use `docker-compose up` to ensure all dependencies and configuration are handled correctly.
+> **Do not use `docker run` directly.** The recommended way is to use `docker compose up` to ensure all dependencies and configuration are handled correctly.
 
 ### Access the Dashboard
 
-Visit [http://localhost:4000/dashboard](http://localhost:4000/dashboard)
+Visit [http://localhost:4000/dashboard](http://localhost:4000/dashboard) when enabled. Dashboard and Bull routes have no built-in login: protect them at the reverse proxy. The MCP panel does not request a token and displays only its operational summary.
 
 ---
 
 ## Endpoints
 
+- `POST /mcp` — Optional MCP discovery and tool calls with `MCP_AUTH_KEY`
 - `POST /task` — Receives tasks for routing to Workers
 - `GET /health` — Public status info; more details with authentication
-- `GET /logs` — Last 1000 log lines (authentication required)
+- `GET /logs` — Recent log lines, bounded by `MAX_LOGS` (authentication required)
 - `GET /dashboard` — Web dashboard (optional, enable in config)
 - `GET /bull` — BullMQ dashboard (optional, enable in config)
 
@@ -212,15 +236,16 @@ After installation and configuration, you can test your Load Balancer as follows
 Make sure your Load Balancer is running (default port: 4000):
 
 ```bash
-npm start
+npm run build
+node dist/app.js
 ```
 
 Or, if using Docker:
 
 ```bash
 docker network create andera-net
-docker-compose build
-docker-compose up
+docker compose build
+docker compose up
 ```
 
 Test the health endpoint:
@@ -296,17 +321,3 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for repository guidelines, and [How to Co
 ## License
 
 For license details, see the [LICENCE](LICENCE) file.
-
-## Native MCP
-
-Expose selected functions to agents at `/mcp` without another service. Set a distinct `MCP_AUTH_KEY`, copy `mcp.example.json` to `mcp.json`, and set the environment variables referenced by each target's `workerAuthKeyEnv`. Agents configure only the endpoint URL and the MCP bearer token.
-
-The configuration reloads live. Omit `functions` for all functions within a target; use an explicit list to restrict access. Missing configuration or token disables MCP. Invalid edits keep the last valid configuration; removing the file disables new access.
-
-The LB uses existing Worker REST endpoints and internal credentials. Workers do not need MCP enabled. Replicas of a group/contract must share the configured key. The optional `docker-compose.mcp.yml` mounts `.mcp/mcp.json` through a directory for atomic-save support.
-
-Authenticated `/health` shows the full MCP status, target selection, exact tool names, input schemas and sanitized reload errors. The dashboard asks for no token and shows only the endpoint, enabled state, tool titles and availability.
-
-V1 supports stateless Streamable HTTP and synchronous calls. It does not implement OAuth; ChatGPT web compatibility is therefore not promised. See [MCP documentation](https://andera.top/docs/mcp).
-
-Run `npm test` for protocol/security tests and the LB/Redis integration test (requires local `redis-server`).
