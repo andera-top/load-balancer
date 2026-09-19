@@ -4,7 +4,7 @@
 
 # Andera Load Balancer
 
-**Andera** is a high-performance, open-source Task Orchestration Platform (TOP) designed for simplicity, flexibility, and scalability.
+**Andera** is a high-performance, source-available Task Orchestration Platform (TOP) designed for simplicity, flexibility, and scalability.
 
 ---
 
@@ -43,7 +43,7 @@ The Load Balancer is the entrypoint and orchestrator for the Andera platform. It
 
 ### Prerequisites
 
-- [Node.js](https://nodejs.org/) (v18.14.1+; Docker uses Node 20)
+- [Node.js](https://nodejs.org/) (Node 24 LTS recommended; runtime minimum 18.14.1; Docker uses Node 24)
 - [npm](https://www.npmjs.com/) or [yarn](https://yarnpkg.com/)
 - [Docker](https://www.docker.com/) (optional)
 
@@ -288,14 +288,14 @@ For more details, see the [Testing Guide](https://andera.top/docs/load-balancer/
 
 ## Contributing
 
-Andera is open source and community-driven!
+Andera makes its source available and welcomes community contributions.
 See [CONTRIBUTING.md](CONTRIBUTING.md) for repository guidelines, and [How to Contribute](https://andera.top/docs/contribute) for the project's philosophy and license.
 
 ---
 
 ## License
 
-For license details, see the [LICENSE](LICENSE) file.
+For license details, see the [LICENCE](LICENCE) file.
 
 ## Native MCP
 

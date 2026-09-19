@@ -14,7 +14,7 @@ Thank you for your interest in contributing to Andera Load Balancer! Your help m
 
 ## Philosophy
 
-Andera is open source and community-driven. We value simplicity, clarity, and focused contributions. For the global project philosophy, see the [Andera Contribute page](https://andera.top/docs/contribute).
+Andera makes its source available and welcomes community contributions. We value simplicity, clarity, and focused contributions. For the global project philosophy, see the [Andera Contribute page](https://andera.top/docs/contribute).
 
 ---
 
@@ -23,7 +23,7 @@ Andera is open source and community-driven. We value simplicity, clarity, and fo
 1. **Fork the repository** and create a feature branch.
 2. **Install dependencies** and set up your environment.
 3. **Make your changes** (one feature or fix per PR).
-4. **Run `npm run lint`** to auto-format your code.
+4. **Run `npm run lint`** to check code formatting.
 5. **Test your changes** locally.
 6. **Submit a Pull Request** with a clear description.
 
@@ -42,13 +42,13 @@ Andera is open source and community-driven. We value simplicity, clarity, and fo
 
 - Use 2 spaces for indentation.
 - No semicolons, use single quotes.
-- Run `npm run lint` before committing (Prettier will auto-format your code).
+- Run `npm run lint` before committing (Prettier checks formatting without changing files).
 
 ---
 
 ## License
 
-By contributing, you agree that your contributions will be licensed under the Elastic License 2.0. See the [LICENSE](../LICENSE) file for details.
+By contributing, you agree that your contributions will be licensed under the repository license. See the [LICENCE](LICENCE) file for details.
 
 ---
 
