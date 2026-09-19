@@ -1,4 +1,4 @@
-import { Worker, DelayedError } from 'bullmq'
+import { Worker, DelayedError, UnrecoverableError } from 'bullmq'
 import { getPendingTaskResolver, authKeyMap } from './taskQueue'
 import { selectBestWorker, reserveSlot, releaseSlot, getDiscoveredWorkers, hasMatchingWorker } from './workerManager'
 import axios from 'axios'
@@ -30,7 +30,7 @@ export function startTaskWorker() {
       if (!resolver) {
         // Pending promises and credentials intentionally stay in process memory.
         // A different LB instance (or a restarted one) cannot safely resume this job.
-        throw new Error('Task context is no longer available')
+        throw new UnrecoverableError('Task context is no longer available')
       }
       let selectedWorker = null
       let reserved = false
@@ -74,6 +74,15 @@ export function startTaskWorker() {
         }
       } catch (err: any) {
         if (err instanceof DelayedError) throw err
+        // A timeout leaves the outcome uncertain. Never dispatch a duplicate
+        // while the Worker may still be running or cleaning up the first call.
+        if (
+          !getPendingTaskResolver(payload._taskId) ||
+          (axios.isAxiosError(err) && (['ECONNABORTED', 'ETIMEDOUT'].includes(err.code || '') || err.response?.status === 504))
+        ) {
+          resolver.reject(new Error('Worker task timed out'))
+          throw new UnrecoverableError('Worker task timed out')
+        }
         // Keep the resolver for retries and settle it on the last failure.
         // Never retain Axios request configuration (including auth headers) in Redis.
         if (job.attemptsMade + 1 >= (job.opts.attempts || 1)) {

@@ -61,7 +61,9 @@ test('actual LB + Redis: discovers, authenticates, dispatches and reports MCP sa
     MCP_KEY = 'agent-integration-key'
   let requests = [],
     fail = false,
-    malformedHealth = false
+    malformedHealth = false,
+    timeoutResponse = false,
+    hangResponse = false
   const fake = express()
   fake.use(express.json())
   wss = new WebSocketServer({ port: 0, host: '127.0.0.1' })
@@ -91,6 +93,8 @@ test('actual LB + Redis: discovers, authenticates, dispatches and reports MCP sa
   fake.post('/task', (req, res) => {
     requests.push({ headers: req.headers, body: req.body })
     if (req.headers.authorization !== WORKER_KEY || req.headers['x-lb-auth'] !== LB_KEY) return res.sendStatus(401)
+    if (hangResponse) return
+    if (timeoutResponse) return res.status(504).json({ code: 'FUNCTION_TIMEOUT', error: 'Function execution timed out' })
     if (fail) return res.status(500).json({ error: 'Upstream error' })
     if (req.body.mode === 'stream') {
       res.type('text/plain').write('first')
@@ -230,6 +234,29 @@ test('actual LB + Redis: discovers, authenticates, dispatches and reports MCP sa
   assert.deepEqual((await client.listTools()).tools, [])
   assert.equal((await client.callTool({ name: tool.name, arguments: { name: 'Denied' } })).isError, true)
   assert.equal(requests.length, 4)
+  fail = false
+  timeoutResponse = true
+  const beforeTimeout = requests.length
+  const timedOut = await fetch(base + '/task', {
+    method: 'POST',
+    headers: { ...auth(LB_KEY), 'x-wr-auth': WORKER_KEY, 'content-type': 'application/json' },
+    body: JSON.stringify({ group: 'web', contract: 1, function: 'hello', input: { name: 'Timeout' } }),
+  })
+  assert.equal(timedOut.status, 500)
+  await new Promise(resolve => setTimeout(resolve, 200))
+  assert.equal(requests.length, beforeTimeout + 1, 'A Worker timeout must not consume the configured REST retries')
+  timeoutResponse = false
+  hangResponse = true
+  const beforeHang = requests.length
+  const expired = await fetch(base + '/task', {
+    method: 'POST',
+    headers: { ...auth(LB_KEY), 'x-wr-auth': WORKER_KEY, 'content-type': 'application/json' },
+    body: JSON.stringify({ group: 'web', contract: 1, function: 'hello', input: { name: 'Expired' } }),
+  })
+  assert.equal(expired.status, 500)
+  await new Promise(resolve => setTimeout(resolve, 300))
+  assert.equal(requests.length, beforeHang + 1, 'An upstream timeout must not dispatch the same task again')
+  hangResponse = false
   malformedHealth = true
   await waitFor(async () => {
     const health = await (await fetch(base + '/health', { headers: auth(LB_KEY) })).json()

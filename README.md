@@ -42,6 +42,12 @@ The Load Balancer is the entrypoint and orchestrator for the Andera platform. It
 
 ---
 
+## Task timeouts
+
+The LB does not automatically retry Worker HTTP 504 responses, upstream request timeouts, or jobs whose caller deadline has expired. Other failures still follow `TASK_ATTEMPTS`. The LB response remains its sanitized task error; no upstream request credentials enter Redis errors.
+
+Worker Core's function deadline triggers cooperative cancellation through `context.signal`. The Worker retains its slot until the handler actually settles; inspect authenticated **Worker** `/health` at `executions.timedOutRunning` for lingering calls. An LB/client timeout or disconnection does not propagate a cancellation request to the Worker. Configure the LB deadline to allow for queueing and the Worker's execution deadline. Completed external side effects are not undone.
+
 ## Features
 
 - **MCP tools:** One endpoint and agent token for selected functions across Worker groups/contracts.
