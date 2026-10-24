@@ -66,7 +66,7 @@ Worker Core's function deadline triggers cooperative cancellation through `conte
 
 ### Prerequisites
 
-- [Node.js](https://nodejs.org/) (Node 24 LTS recommended; runtime minimum 18.14.1; Docker uses Node 24)
+- [Node.js](https://nodejs.org/) (Node 24 LTS recommended; supported: 22.23.4+, 24.22.1+ or 26.12.1+, which include the October 2026 security fixes; Docker uses Node 24.22.1)
 - [npm](https://www.npmjs.com/) or [yarn](https://yarnpkg.com/)
 - [Docker](https://www.docker.com/) (optional)
 

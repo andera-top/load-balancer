@@ -1,6 +1,6 @@
 services:
   redis:
-    image: redis:7
+    image: redis:7.4.11
     restart: always
     command: redis-server --appendonly yes --replicaof no one
     volumes:
@@ -39,7 +39,7 @@ services:
       - andera-net
     command: node dist/app.js
     volumes:
-      - ./workers.json:/app/workers.json
+      - ./workers.json:/app/workers.json:ro
 
 volumes:
   redis-data:
