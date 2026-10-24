@@ -18,9 +18,9 @@ The LB uses existing Worker REST endpoints and internal credentials. Workers do 
 
 Authenticated `/health` shows the full MCP status, target selection, exact tool names, input schemas and sanitized reload errors. The dashboard asks for no token and shows only the endpoint, enabled state, tool titles and availability.
 
-V1 supports stateless Streamable HTTP and synchronous calls. It does not implement OAuth; ChatGPT web compatibility is therefore not promised. See [MCP documentation](https://andera.top/docs/mcp).
+V1 supports stateless Streamable HTTP and synchronous calls. MCP calls wait up to `TASK_TIMEOUT` (default 300 s) and are not retried; many MCP clients give up after 60 s by default, in which case the result is discarded while the Worker finishes the call. It does not implement OAuth; ChatGPT web compatibility is therefore not promised. See [MCP documentation](https://andera.top/docs/mcp).
 
-Run `npm test` for protocol/security tests and the LB/Redis integration test (requires local `redis-server`).
+Run `npm test` for protocol/security tests and the LB/Redis integration test (it is skipped when `redis-server` is not installed locally).
 
 ---
 
@@ -44,7 +44,9 @@ The Load Balancer is the entrypoint and orchestrator for the Andera platform. It
 
 ## Task timeouts
 
-The LB does not automatically retry Worker HTTP 504 responses, upstream request timeouts, or jobs whose caller deadline has expired. Other failures still follow `TASK_ATTEMPTS`. The LB response remains its sanitized task error; no upstream request credentials enter Redis errors.
+The LB does not automatically retry Worker HTTP 504 responses, upstream request timeouts, or jobs whose caller deadline has expired; these return HTTP 500. Worker rejections (HTTP 4xx except 408 and 429) and webhook delivery failures (`code: "WEBHOOK_FAILED"`, the function already ran) are not retried either: the caller receives the Worker's status and error message. Other failures still follow `TASK_ATTEMPTS`. Worker credentials and webhook headers stay in LB memory and never enter Redis or Bull Board; task inputs do.
+
+In webhook mode the LB answers immediately, but the task still has to be dispatched before `TASK_TIMEOUT`: if the group stays saturated or the LB restarts, the task is dropped without a webhook call.
 
 Worker Core's function deadline triggers cooperative cancellation through `context.signal`. The Worker retains its slot until the handler actually settles; inspect authenticated **Worker** `/health` at `executions.timedOutRunning` for lingering calls. An LB/client timeout or disconnection does not propagate a cancellation request to the Worker. Configure the LB deadline to allow for queueing and the Worker's execution deadline. Completed external side effects are not undone.
 
@@ -56,7 +58,7 @@ Worker Core's function deadline triggers cooperative cancellation through `conte
 - **Dashboard:** Real-time web dashboard for monitoring Workers, tasks, and logs.
 - **WebSocket:** Real-time updates for slot usage and Worker status.
 - **Authentication:** Forwards client authentication headers to Workers; validates requests with its own key.
-- **Native logging:** Exposes last 1000 logs via `/logs` (authentication required).
+- **Native logging:** Exposes recent logs, bounded by `MAX_LOGS`, via `/logs` (authentication required).
 
 > **Queue process boundary:** Run one active Load Balancer process per Redis queue. BullMQ stores jobs in Redis, while the waiting HTTP response and Worker credential remain in that LB process. Requests cannot resume on another LB replica or after a restart; orphaned jobs fail visibly instead of being reported as successful.
 
@@ -79,6 +81,8 @@ cp .env.example .env
 npm install
 ```
 
+Then set `LB_AUTH_KEY` in `.env` (for example `openssl rand -hex 32`). Every Worker behind this LB must use the same `LB_AUTH_KEY`; the LB fails to start without it.
+
 ---
 
 ## Configuration
@@ -94,7 +98,7 @@ Below are the main environment variables used by the Load Balancer. All variable
 | `PORT`                      | HTTP port for the Load Balancer API.                                                       | `4000`   |
 | `REDIS_HOST`                | Host for the Redis instance used by BullMQ.                                                | `localhost` |
 | `REDIS_PORT`                | Port for the Redis instance used by BullMQ.                                                | `6379`   |
-| `LB_AUTH_KEY`               | Authentication key for the Load Balancer and Worker communication or to use the endpoints. | Required |
+| `LB_AUTH_KEY`               | Key for LB endpoints and LB-to-Worker calls; must equal `LB_AUTH_KEY` on every Worker. Use hex: it is also sent as a WebSocket subprotocol. | Required |
 | `WORKER_DISCOVERY_INTERVAL` | Interval (ms) for polling Workers for status. | `1000` |
 | `WORKER_DISCOVERY_TIMEOUT`  | Timeout (ms) for Worker discovery requests.                                                | `3000`   |
 | `WORKER_DISCOVERY_RETRIES`  | Number of retries for Worker discovery.                                                    | `10`     |
@@ -102,7 +106,7 @@ Below are the main environment variables used by the Load Balancer. All variable
 | `WS_HEARTBEAT_TIMEOUT`      | Timeout (ms) for WebSocket heartbeat.                                                      | `3000`   |
 | `DASHBOARD_ENABLED`         | Enable or disable the dashboard interface on `/dashboard`.                                 | `false`  |
 | `BULL_BOARD_ENABLED`        | Enable or disable the BullMQ dashboard interface on `/bull`.                               | `false`  |
-| `LOG_LEVEL`                 | Log verbosity (`info`, `warn`, `error`, etc.).                                             | `info`   |
+| `LOG_LEVEL`                 | Log verbosity: `debug`, `info`, `warn` or `error`.                                         | `info`   |
 | `MAX_LOGS`                  | Number of log lines to keep in memory (for `/logs`).                                       | `1000`   |
 | `TASK_TIMEOUT`              | Timeout (ms) for task execution.                                                           | `300000` |
 | `TASK_ATTEMPTS`             | Number of attempts for a task before failure.                                              | `3`      |
@@ -110,7 +114,7 @@ Below are the main environment variables used by the Load Balancer. All variable
 | `MCP_AUTH_KEY` | Dedicated agent token distinct from internal and target keys. | Empty: disabled |
 | `MCP_CONFIG_PATH` | MCP configuration path relative to the application root, or absolute. | `mcp.json` |
 | `MCP_ALLOWED_ORIGINS` | Comma-separated exact browser origins; native clients need none. | Empty |
-| `WORKERS_CONFIG_PATH` | Override for the Worker URL-list file. | Application-root `workers.json` |
+| `WORKERS_CONFIG_PATH` | Override for the Worker URL-list file, relative to the working directory or absolute. | Application-root `workers.json` |
 
 The table lists runtime defaults. The sample `.env` uses Docker's `redis` hostname, a 3000 ms discovery interval, and enables the optional dashboards. For local Redis outside Docker, set `REDIS_HOST=localhost`.
 
@@ -143,7 +147,8 @@ For advanced configuration, see the [Load Balancer Configuration Guide](https://
 
 - The list of available Workers is managed in the file `workers.json` (at the project root).
 - Each entry is a URL (e.g., `http://localhost:3000`) pointing to a Worker instance.
-- This file is read at startup and can be hot-reloaded for dynamic cluster management.
+- This file is read at startup and can be hot-reloaded for dynamic cluster management. An invalid or deleted file keeps the last valid list; write `[]` to remove all Workers.
+- When the LB runs in Docker, `localhost` is the LB container itself: use the Docker network names below.
 
 ```json
 ["http://localhost:3000"]
@@ -210,13 +215,13 @@ docker compose build
 docker compose up
 ```
 
-This will start both Redis and the Load Balancer, and automatically mount your local `workers.json` file into the container for live updates.
+This will start both Redis and the Load Balancer, and mount your local `workers.json` file read-only into the container for live updates. The mount targets a single file: editors that save by replacing the file (atomic save) leave the container on the old version, so edit it in place or restart the LB.
 
 > **Do not use `docker run` directly.** The recommended way is to use `docker compose up` to ensure all dependencies and configuration are handled correctly.
 
 ### Access the Dashboard
 
-Visit [http://localhost:4000/dashboard](http://localhost:4000/dashboard) when enabled. Dashboard and Bull routes have no built-in login: protect them at the reverse proxy. The MCP panel does not request a token and displays only its operational summary.
+Visit [http://localhost:4000/dashboard](http://localhost:4000/dashboard) when enabled. Dashboard (`/dashboard` and its `/dashboard/api/*` routes, which include Worker URLs and logs) and Bull (`/bull`, job data and actions) have no built-in login: protect them at the reverse proxy, or keep them disabled. The MCP panel does not request a token and displays only its operational summary.
 
 ---
 

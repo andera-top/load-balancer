@@ -1,6 +1,6 @@
 import { Router, Request, Response, NextFunction } from 'express'
 import { config } from '../config'
-import { requireAuth } from '../middleware/auth'
+import { requireAuth, safeEqual } from '../middleware/auth'
 import { getDiscoveredWorkers, getInvalidWorkers } from '../utils/workerManager'
 import { taskQueue } from '../utils/taskQueue'
 import { getMcpStatus } from '../mcp/state'
@@ -49,7 +49,7 @@ router.get('/health', async (req: Request, res: Response, next: NextFunction) =>
   const rawAuth = req.headers['authorization'] || req.headers['x-lb-auth']
   let authKey = typeof rawAuth === 'string' ? rawAuth : undefined
   if (authKey && authKey.startsWith('Bearer ')) authKey = authKey.slice(7).trim()
-  if (authKey === config.lbAuthKey) return next()
+  if (safeEqual(authKey, config.lbAuthKey)) return next()
 
   const { status } = await checkServices()
   return res.json({ status })

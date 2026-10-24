@@ -1,7 +1,7 @@
 import express from 'express'
 import compression from 'compression'
-import { config } from './config'
-import { log } from './utils/logger'
+import { config, websocketSafeLbAuthKey } from './config'
+import { log, warn } from './utils/logger'
 import healthController from './controllers/healthController'
 import taskController from './controllers/taskController'
 import logsController from './controllers/logsController'
@@ -54,6 +54,8 @@ if (config.bullBoardEnabled) {
 
 app.listen(config.port, () => {
   log('[LB]', `Load Balancer ready on port ${config.port}`)
+  if (!websocketSafeLbAuthKey)
+    warn('[LB]', 'LB_AUTH_KEY contains characters WebSocket subprotocols reject; Worker slot updates fall back to polling. Use a hex key.')
   startTaskWorker()
   const refresh = async () => {
     try {

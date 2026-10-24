@@ -96,6 +96,8 @@ test('actual LB + Redis: discovers, authenticates, dispatches and reports MCP sa
     if (hangResponse) return
     if (timeoutResponse) return res.status(504).json({ code: 'FUNCTION_TIMEOUT', error: 'Function execution timed out' })
     if (fail) return res.status(500).json({ error: 'Upstream error' })
+    if (req.body.input?.name === 'Invalid') return res.status(400).json({ success: false, error: 'Unexpected param: extra' })
+    if (req.body.mode === 'webhook') return res.json({ success: true, message: 'Sent to webhook' })
     if (req.body.mode === 'stream') {
       res.type('text/plain').write('first')
       setTimeout(() => res.end('second'), 200)
@@ -257,6 +259,30 @@ test('actual LB + Redis: discovers, authenticates, dispatches and reports MCP sa
   await new Promise(resolve => setTimeout(resolve, 300))
   assert.equal(requests.length, beforeHang + 1, 'An upstream timeout must not dispatch the same task again')
   hangResponse = false
+  const beforeInvalid = requests.length
+  const rejected = await fetch(base + '/task', {
+    method: 'POST',
+    headers: { ...auth(LB_KEY), 'x-wr-auth': WORKER_KEY, 'content-type': 'application/json' },
+    body: JSON.stringify({ group: 'web', contract: 1, function: 'hello', input: { name: 'Invalid' } }),
+  })
+  assert.equal(rejected.status, 400)
+  assert.deepEqual(await rejected.json(), { error: 'Unexpected param: extra' })
+  assert.equal(requests.length, beforeInvalid + 1, 'Worker validation errors must not be retried')
+  const accepted = await fetch(base + '/task', {
+    method: 'POST',
+    headers: { ...auth(LB_KEY), 'x-wr-auth': WORKER_KEY, 'content-type': 'application/json' },
+    body: JSON.stringify({
+      group: 'web',
+      contract: 1,
+      function: 'hello',
+      input: { name: 'Hook' },
+      mode: 'webhook',
+      webhook: { url: 'https://receiver.example/hook', headers: { Authorization: 'Bearer receiver-secret' } },
+    }),
+  })
+  assert.equal(accepted.status, 200)
+  await waitFor(async () => requests.at(-1).body.mode === 'webhook')
+  assert.deepEqual(requests.at(-1).body.webhook.headers, { Authorization: 'Bearer receiver-secret' }, 'Headers kept in memory reach the Worker')
   malformedHealth = true
   await waitFor(async () => {
     const health = await (await fetch(base + '/health', { headers: auth(LB_KEY) })).json()

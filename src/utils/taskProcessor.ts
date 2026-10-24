@@ -1,5 +1,5 @@
 import { Worker, DelayedError, UnrecoverableError } from 'bullmq'
-import { getPendingTaskResolver, authKeyMap } from './taskQueue'
+import { getPendingTaskResolver, authKeyMap, webhookHeadersMap } from './taskQueue'
 import { selectBestWorker, reserveSlot, releaseSlot, getDiscoveredWorkers, hasMatchingWorker } from './workerManager'
 import axios from 'axios'
 import { config } from '../config'
@@ -12,6 +12,16 @@ function computeTotalSlots() {
 let worker: Worker | undefined = undefined
 let currentConcurrency = 0
 const streamCompletions = new Map<string, () => void>()
+
+/** A Worker answer that retrying cannot change, propagated to the caller. */
+export class WorkerRejectedError extends Error {
+  constructor(
+    readonly status: number,
+    message: string
+  ) {
+    super(message)
+  }
+}
 
 export function completeStreamReservation(taskId: string) {
   const complete = streamCompletions.get(taskId)
@@ -65,7 +75,9 @@ export function startTaskWorker() {
             // response ends, errors, times out, or its client disconnects.
             await streamFinished
           } else {
-            const response = await axios.post(url, payload, { headers, timeout: config.taskTimeout, maxRedirects: 0 })
+            const webhookHeaders = webhookHeadersMap.get(payload._taskId)
+            const body = webhookHeaders ? { ...payload, webhook: { ...payload.webhook, headers: webhookHeaders } } : payload
+            const response = await axios.post(url, body, { headers, timeout: config.taskTimeout, maxRedirects: 0 })
             resolver.resolve(response.data)
             authKeyMap.delete(payload._taskId)
           }
@@ -82,6 +94,15 @@ export function startTaskWorker() {
         ) {
           resolver.reject(new Error('Worker task timed out'))
           throw new UnrecoverableError('Worker task timed out')
+        }
+        // Invalid requests fail identically on every attempt, and a failed webhook
+        // delivery means the function already ran: never dispatch them again.
+        const status = axios.isAxiosError(err) ? err.response?.status : undefined
+        const data = axios.isAxiosError(err) ? (err.response?.data as any) : undefined
+        if (status && ((status >= 400 && status < 500 && status !== 408 && status !== 429) || data?.code === 'WEBHOOK_FAILED')) {
+          const message = typeof data?.error === 'string' ? data.error : 'Worker rejected the task'
+          resolver.reject(new WorkerRejectedError(status, message))
+          throw new UnrecoverableError(message)
         }
         // Keep the resolver for retries and settle it on the last failure.
         // Never retain Axios request configuration (including auth headers) in Redis.

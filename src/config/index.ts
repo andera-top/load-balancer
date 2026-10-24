@@ -23,6 +23,12 @@ export const config = {
   requestBodyLimit: process.env.REQUEST_BODY_LIMIT || '10mb',
 }
 
+/** The key travels as a WebSocket subprotocol, which only allows HTTP token characters. */
+export const websocketSafeLbAuthKey = /^[!#$%&'*+\-.0-9A-Z^_`|a-z~]+$/.test(config.lbAuthKey)
+
+/** Largest delay setTimeout accepts; larger values fire after 1 ms. */
+export const MAX_TIMER_DELAY = 2147483647
+
 function assertConfig() {
   if (!['debug', 'info', 'warn', 'error'].includes(config.logLevel)) throw new Error('LOG_LEVEL must be debug, info, warn or error')
   if (!config.lbAuthKey || config.lbAuthKey !== config.lbAuthKey.trim()) throw new Error('Missing or invalid LB_AUTH_KEY in environment')
@@ -31,16 +37,23 @@ function assertConfig() {
   if (!Number.isInteger(config.bullmq.redisPort) || config.bullmq.redisPort < 1 || config.bullmq.redisPort > 65535)
     throw new Error('REDIS_PORT must be an integer between 1 and 65535')
   for (const [name, value] of [
-    ['WORKER_DISCOVERY_INTERVAL', config.workerDiscoveryInterval],
-    ['WORKER_DISCOVERY_TIMEOUT', config.workerDiscoveryTimeout],
-    ['WS_HEARTBEAT_INTERVAL', config.wsHeartbeatInterval],
-    ['WS_HEARTBEAT_TIMEOUT', config.wsHeartbeatTimeout],
     ['MAX_LOGS', config.maxLogs],
-    ['TASK_TIMEOUT', config.taskTimeout],
     ['TASK_ATTEMPTS', config.taskAttempts],
   ] as const) {
     if (!Number.isInteger(value) || value < 1) throw new Error(`${name} must be a positive integer`)
   }
+  for (const [name, value] of [
+    ['WORKER_DISCOVERY_INTERVAL', config.workerDiscoveryInterval],
+    ['WORKER_DISCOVERY_TIMEOUT', config.workerDiscoveryTimeout],
+    ['WS_HEARTBEAT_INTERVAL', config.wsHeartbeatInterval],
+    ['WS_HEARTBEAT_TIMEOUT', config.wsHeartbeatTimeout],
+    ['TASK_TIMEOUT', config.taskTimeout],
+  ] as const) {
+    if (!Number.isInteger(value) || value < 1 || value > MAX_TIMER_DELAY) throw new Error(`${name} must be an integer between 1 and ${MAX_TIMER_DELAY}`)
+  }
+  const bodyLimit = /^(\d+(?:\.\d+)?)\s*(?:b|kb|mb|gb)?$/i.exec(config.requestBodyLimit)
+  if (!bodyLimit || !(Number(bodyLimit[1]) > 0)) throw new Error('REQUEST_BODY_LIMIT must be a positive size such as 10mb')
+
   if (!Number.isInteger(config.workerDiscoveryRetries) || config.workerDiscoveryRetries < 0) {
     throw new Error('WORKER_DISCOVERY_RETRIES must be a non-negative integer')
   }

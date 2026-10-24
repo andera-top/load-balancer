@@ -11,7 +11,7 @@ export type Parameter = {
   min?: number
   max?: number
 }
-export function inputSchema(params: Record<string, Parameter>): Tool['inputSchema'] {
+export function inputSchema(params: Record<string, Parameter> = {}): Tool['inputSchema'] {
   const properties: Record<string, any> = Object.create(null)
   const required: string[] = []
   for (const [name, rule] of Object.entries(params)) {

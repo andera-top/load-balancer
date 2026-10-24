@@ -66,6 +66,8 @@ export function getLogs(): string[] {
 
 function stringify(value: any): string {
   if (typeof value === 'string') return value
+  // Error serializers can include credentials (AxiosError.toJSON contains request headers).
+  if (value instanceof Error) return `${value.name}: ${value.message}${(value as any).code ? ` (${(value as any).code})` : ''}`
   try {
     return JSON.stringify(value)
   } catch {

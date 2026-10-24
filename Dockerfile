@@ -16,9 +16,9 @@ WORKDIR /app
 
 COPY --from=builder /app/package*.json ./
 COPY --from=builder /app/node_modules ./node_modules
-COPY --chown=node:node --from=builder /app/dist ./dist
-COPY --chown=node:node --from=builder /app/dashboard/dist ./dashboard/dist
-COPY --chown=node:node --from=builder /app/assets ./assets
+COPY --from=builder /app/dist ./dist
+COPY --from=builder /app/dashboard/dist ./dashboard/dist
+COPY --from=builder /app/assets ./assets
 
 ENV PORT=4000
 EXPOSE ${PORT}

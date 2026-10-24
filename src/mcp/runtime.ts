@@ -21,6 +21,7 @@ export function createBalancerMcp(options: {
   const env = options.env ?? process.env
   const config = new LiveConfig(path.resolve(options.root, env.MCP_CONFIG_PATH || 'mcp.json'), raw => parseBalancerConfig(raw, env), options.report)
   const token = dedicatedToken(env.MCP_AUTH_KEY, [env.LB_AUTH_KEY])
+  if (env.MCP_AUTH_KEY && !token) options.report?.('MCP disabled: MCP_AUTH_KEY must contain no whitespace and differ from LB_AUTH_KEY')
   const enabled = () => !!token && config.current() !== undefined
   const tools = (): ExposedTool[] => {
     const settings = config.current()

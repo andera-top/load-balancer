@@ -116,8 +116,10 @@ export class LiveConfig<T> {
         this.lastError = null
         this.loadedAt = null
       } else {
-        // Revalidate restored content after an I/O failure, even if it is unchanged.
+        // Fail closed on I/O failures (e.g. revoked permissions) and revalidate
+        // restored content, even if it is unchanged.
         if (error.code) {
+          this.value = undefined
           this.raw = undefined
           this.fingerprint = undefined
         }

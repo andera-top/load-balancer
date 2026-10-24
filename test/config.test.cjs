@@ -17,5 +17,9 @@ test('invalid numeric LB configuration fails fast', () => {
   assert.equal(loadConfig({ TASK_ATTEMPTS: '0' }).status, 1)
   assert.equal(loadConfig({ LOG_LEVEL: 'verbose' }).status, 1)
   assert.equal(loadConfig({ LB_AUTH_KEY: ' test-key' }).status, 1)
+  // Node fires larger timer delays after 1 ms.
+  assert.equal(loadConfig({ TASK_TIMEOUT: '3000000000' }).status, 1)
+  assert.equal(loadConfig({ REQUEST_BODY_LIMIT: '10 megs' }).status, 1)
+  assert.equal(loadConfig({ REQUEST_BODY_LIMIT: '512kb' }).status, 0)
   assert.equal(loadConfig().status, 0)
 })

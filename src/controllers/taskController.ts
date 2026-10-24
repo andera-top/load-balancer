@@ -7,7 +7,7 @@ import { error } from '../utils/logger'
 import http from 'http'
 import https from 'https'
 import { URL } from 'url'
-import { completeStreamReservation } from '../utils/taskProcessor'
+import { completeStreamReservation, WorkerRejectedError } from '../utils/taskProcessor'
 
 const router = Router()
 
@@ -62,6 +62,7 @@ router.post('/task', requireAuth(), express.json({ limit: config.requestBodyLimi
       return res.json({ success: true, message: 'Task accepted, result will be sent to webhook' })
     }
     if (mode === 'stream') {
+      let releaseReservation = () => {}
       try {
         const result = await addTaskAndWait(payload, { priority, timeout: config.taskTimeout, authorization: wrAuth })
         const { workerUrl, reservationId } = result as { workerUrl: string; reservationId: string }
@@ -71,6 +72,7 @@ router.post('/task', requireAuth(), express.json({ limit: config.requestBodyLimi
           released = true
           completeStreamReservation(reservationId)
         }
+        releaseReservation = release
         if (res.destroyed) {
           release()
           return
@@ -94,6 +96,8 @@ router.post('/task', requireAuth(), express.json({ limit: config.requestBodyLimi
         const proxyReq = client.request(reqOptions, proxyRes => {
           res.status(proxyRes.statusCode || 502)
           res.setHeader('Content-Type', proxyRes.headers['content-type'] || 'application/octet-stream')
+          // Stop compression from buffering the stream until it ends.
+          res.setHeader('Cache-Control', 'no-transform')
           proxyRes.pipe(res)
           proxyRes.once('end', release)
           const abortStream = () => {
@@ -119,6 +123,8 @@ router.post('/task', requireAuth(), express.json({ limit: config.requestBodyLimi
         proxyReq.write(JSON.stringify(payload))
         proxyReq.end()
       } catch (err: any) {
+        // Setup can fail after the reservation was transferred: free the Worker slot.
+        releaseReservation()
         res.status(503).json({ error: 'No available worker for this group/contract/function' })
       }
       return
@@ -126,6 +132,7 @@ router.post('/task', requireAuth(), express.json({ limit: config.requestBodyLimi
     const result = await addTaskAndWait(payload, { priority, timeout: config.taskTimeout, authorization: wrAuth })
     res.json(result)
   } catch (err: any) {
+    if (err instanceof WorkerRejectedError) return res.status(err.status).json({ error: err.message })
     res.status(500).json({ error: 'Task failed or timed out' })
   }
 })
