@@ -8,22 +8,6 @@
 
 ---
 
-## Native MCP
-
-Expose selected functions to agents at `/mcp` without another service. Set a distinct `MCP_AUTH_KEY`, copy `mcp.example.json` to `mcp.json`, and set the environment variables referenced by each target's `workerAuthKeyEnv`. Agents configure only the endpoint URL and the MCP bearer token.
-
-The configuration reloads live. Omit `functions` for all functions within a target; use an explicit list to restrict access. Missing configuration or token disables MCP. Invalid edits keep the last valid configuration; removing the file disables new access.
-
-The LB uses existing Worker REST endpoints and internal credentials. Workers do not need MCP enabled. Replicas of a group/contract must share the configured key. The optional `docker-compose.mcp.yml` mounts `.mcp/mcp.json` through a directory for atomic-save support.
-
-Authenticated `/health` shows the full MCP status, target selection, exact tool names, input schemas and sanitized reload errors. The dashboard asks for no token and shows only the endpoint, enabled state, tool titles and availability.
-
-V1 supports stateless Streamable HTTP and synchronous calls. MCP calls wait up to `TASK_TIMEOUT` (default 300 s) and are not retried; many MCP clients give up after 60 s by default, in which case the result is discarded while the Worker finishes the call. It does not implement OAuth; ChatGPT web compatibility is therefore not promised. See [MCP documentation](https://andera.top/docs/mcp).
-
-Run `npm test` for protocol/security tests and the LB/Redis integration test (it is skipped when `redis-server` is not installed locally).
-
----
-
 ## What is Andera?
 
 Andera is composed of three main components:
@@ -39,6 +23,28 @@ Learn more: [Andera Documentation](https://andera.top/docs/)
 ## About Load Balancer
 
 The Load Balancer is the entrypoint and orchestrator for the Andera platform. It routes tasks to available Workers, manages clusters, handles priorities and contracts, and provides a real-time dashboard for monitoring.
+
+---
+
+## Native MCP
+
+The [Model Context Protocol](https://modelcontextprotocol.io) (MCP) is the standard way for AI agents such as Claude, Cursor or VS Code to discover and call tools. The Load Balancer can expose functions from all your Workers as MCP tools at a single `/mcp` endpoint. Agents configure one URL and one bearer token; their calls go through the usual queue and reach Workers over REST, so Workers do not need MCP enabled.
+
+To enable it:
+
+1. Set `MCP_AUTH_KEY` to a dedicated random token, different from `LB_AUTH_KEY`.
+2. Copy `mcp.example.json` to `mcp.json`. Each target names a group and contract, the functions to expose (omit `functions` for all of them), and in `workerAuthKeyEnv` the environment variable that holds those Workers' `AUTH_KEY`. Replicas of a group/contract must share that key.
+3. Set those variables and restart the Load Balancer.
+
+`mcp.json` reloads without a restart: invalid edits keep the last valid configuration, and removing the file disables MCP. With Docker, `docker-compose.mcp.yml` mounts `.mcp/mcp.json` through a directory so atomic saves from editors are picked up.
+
+Good to know:
+
+- Calls are synchronous, wait up to `TASK_TIMEOUT` (default 300 s) and are not retried. Many MCP clients give up after 60 s; the Worker then finishes the call but the result is discarded.
+- The endpoint uses stateless Streamable HTTP with bearer authentication. OAuth is not implemented, so clients that require it, such as ChatGPT on the web, are not supported.
+- Authenticated `/health` shows the full MCP status, tool names, input schemas and configuration errors. The dashboard shows only a summary and no credentials.
+
+Setup and client configuration: [MCP documentation](https://andera.top/docs/mcp).
 
 ---
 
@@ -239,6 +245,8 @@ See [API Reference](https://andera.top/docs/load-balancer/usage/) for details.
 ---
 
 ## Testing your Load Balancer
+
+Run `npm test` for the automated protocol, security and LB/Redis integration tests; the integration test is skipped when `redis-server` is not installed locally.
 
 After installation and configuration, you can test your Load Balancer as follows:
 
