@@ -4,15 +4,14 @@
 
 # Andera Load Balancer
 
-**Andera** is a source-available platform for exposing business functions as REST APIs and MCP tools for AI agents. Run a Worker directly or use the Load Balancer to route tasks across Workers; agents connect through one `/mcp` endpoint and one dedicated token.
+**Andera** is a high-performance, open-source Task Orchestration Platform (TOP) designed for simplicity, flexibility, and scalability.
 
 ---
 
 ## What is Andera?
 
 Andera is composed of three main components:
-
-- **Load Balancer:** Routes tasks, monitors Workers, and exposes functions across groups/contracts through one MCP endpoint.
+- **Load Balancer:** Routes and prioritizes tasks, manages Worker clusters, and provides a dashboard for monitoring.
 - **Base Worker:** Template for building your own custom Workers.
 - **Worker Core:** The core engine for all Workers.
 
@@ -26,28 +25,6 @@ The Load Balancer is the entrypoint and orchestrator for the Andera platform. It
 
 ---
 
-## Native MCP
-
-The [Model Context Protocol](https://modelcontextprotocol.io) (MCP) is the standard way for AI agents such as Claude, Cursor or VS Code to discover and call tools. The Load Balancer can expose functions from all your Workers as MCP tools at a single `/mcp` endpoint. Agents configure one URL and one bearer token; their calls go through the usual queue and reach Workers over REST, so Workers do not need MCP enabled.
-
-To enable it:
-
-1. Set `MCP_AUTH_KEY` to a dedicated random token, different from `LB_AUTH_KEY`.
-2. Copy `mcp.example.json` to `mcp.json`. Each target names a group and contract, the functions to expose (omit `functions` for all of them), and in `workerAuthKeyEnv` the environment variable that holds those Workers' `AUTH_KEY`. Replicas of a group/contract must share that key.
-3. Set those variables and restart the Load Balancer.
-
-`mcp.json` reloads without a restart: invalid edits keep the last valid configuration, and removing the file disables MCP. With Docker, `docker-compose.mcp.yml` mounts `.mcp/mcp.json` through a directory so atomic saves from editors are picked up.
-
-Good to know:
-
-- Calls are synchronous, wait up to `TASK_TIMEOUT` (default 300 s) and are not retried. Many MCP clients give up after 60 s; the Worker then finishes the call but the result is discarded.
-- The endpoint uses stateless Streamable HTTP with bearer authentication. OAuth is not implemented, so clients that require it, such as ChatGPT on the web, are not supported.
-- Authenticated `/health` shows the full MCP status, tool names, input schemas and configuration errors. The dashboard shows only a summary and no credentials.
-
-Setup and client configuration: [MCP documentation](https://andera.top/docs/mcp).
-
----
-
 ## Task timeouts
 
 The LB does not automatically retry Worker HTTP 504 responses, upstream request timeouts, or jobs whose caller deadline has expired; these return HTTP 500. Worker rejections (HTTP 4xx except 408 and 429) and webhook delivery failures (`code: "WEBHOOK_FAILED"`, the function already ran) are not retried either: the caller receives the Worker's status and error message. Other failures still follow `TASK_ATTEMPTS`. Worker credentials and webhook headers stay in LB memory and never enter Redis or Bull Board; task inputs do.
@@ -58,7 +35,7 @@ Worker Core's function deadline triggers cooperative cancellation through `conte
 
 ## Features
 
-- **MCP tools:** One endpoint and agent token for selected functions across Worker groups/contracts.
+- **MCP (optional):** Exposes selected functions from your Workers to AI agents.
 - **Task routing:** Distributes tasks to available Workers based on group, function, contract, and priority.
 - **Queue management:** Uses BullMQ for task queuing, prioritization, and retries.
 - **Dashboard:** Real-time web dashboard for monitoring Workers, tasks, and logs.
@@ -320,6 +297,28 @@ For more details, see the [Testing Guide](https://andera.top/docs/load-balancer/
 
 - [Deployment Guide](https://andera.top/docs/load-balancer/deployment/)
 - Supports local, Docker, and cloud deployment.
+
+---
+
+## MCP (optional)
+
+The [Model Context Protocol](https://modelcontextprotocol.io) (MCP) is the standard way for AI agents such as Claude, Cursor or VS Code to discover and call tools. The Load Balancer can expose functions from all your Workers as MCP tools at a single `/mcp` endpoint. Agents configure one URL and one bearer token; their calls go through the usual queue and reach Workers over REST, so Workers do not need MCP enabled.
+
+To enable it:
+
+1. Set `MCP_AUTH_KEY` to a dedicated random token, different from `LB_AUTH_KEY`.
+2. Copy `mcp.example.json` to `mcp.json`. Each target names a group and contract, the functions to expose (omit `functions` for all of them), and in `workerAuthKeyEnv` the environment variable that holds those Workers' `AUTH_KEY`. Replicas of a group/contract must share that key.
+3. Set those variables and restart the Load Balancer.
+
+`mcp.json` reloads without a restart: invalid edits keep the last valid configuration, and removing the file disables MCP. With Docker, `docker-compose.mcp.yml` mounts `.mcp/mcp.json` through a directory so atomic saves from editors are picked up.
+
+Good to know:
+
+- Calls are synchronous, wait up to `TASK_TIMEOUT` (default 300 s) and are not retried. Many MCP clients give up after 60 s; the Worker then finishes the call but the result is discarded.
+- The endpoint uses stateless Streamable HTTP with bearer authentication. OAuth is not implemented, so clients that require it, such as ChatGPT on the web, are not supported.
+- Authenticated `/health` shows the full MCP status, tool names, input schemas and configuration errors. The dashboard shows only a summary and no credentials.
+
+Setup and client configuration: [Load Balancer MCP documentation](https://andera.top/docs/load-balancer/mcp).
 
 ---
 
