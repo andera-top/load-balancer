@@ -3,11 +3,12 @@ import { addTaskAndWait } from '../utils/taskQueue'
 import { config } from '../config'
 import axios from 'axios'
 import { requireAuth } from '../middleware/auth'
-import { error } from '../utils/logger'
+import { warn } from '../utils/logger'
 import http from 'http'
 import https from 'https'
 import { URL } from 'url'
 import { completeStreamReservation, WorkerRejectedError } from '../utils/taskProcessor'
+import { notifyWebhookFailure, webhookFailure } from '../utils/webhookNotifier'
 
 const router = Router()
 
@@ -57,7 +58,9 @@ router.post('/task', requireAuth(), express.json({ limit: config.requestBodyLimi
         return res.status(400).json({ error: 'Missing or invalid webhook.url for mode webhook' })
       }
       addTaskAndWait(payload, { priority, timeout: config.taskTimeout, authorization: wrAuth }).catch(err => {
-        error('[LB]', 'Failed to enqueue task in webhook mode:', err)
+        const failure = webhookFailure(err)
+        warn('[LB]', `Webhook task failed (${failure.code}); notifying the webhook`)
+        return notifyWebhookFailure(webhook.url, webhook.headers, failure)
       })
       return res.json({ success: true, message: 'Task accepted, result will be sent to webhook' })
     }

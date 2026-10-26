@@ -1,5 +1,5 @@
 import { Worker, DelayedError, UnrecoverableError } from 'bullmq'
-import { getPendingTaskResolver, authKeyMap, webhookHeadersMap } from './taskQueue'
+import { getPendingTaskResolver, authKeyMap, webhookHeadersMap, TaskTimeoutError } from './taskQueue'
 import { selectBestWorker, reserveSlot, releaseSlot, getDiscoveredWorkers, hasMatchingWorker } from './workerManager'
 import axios from 'axios'
 import { config } from '../config'
@@ -17,7 +17,8 @@ const streamCompletions = new Map<string, () => void>()
 export class WorkerRejectedError extends Error {
   constructor(
     readonly status: number,
-    message: string
+    message: string,
+    readonly code?: string
   ) {
     super(message)
   }
@@ -92,7 +93,7 @@ export function startTaskWorker() {
           !getPendingTaskResolver(payload._taskId) ||
           (axios.isAxiosError(err) && (['ECONNABORTED', 'ETIMEDOUT'].includes(err.code || '') || err.response?.status === 504))
         ) {
-          resolver.reject(new Error('Worker task timed out'))
+          resolver.reject(new TaskTimeoutError('Worker task timed out'))
           throw new UnrecoverableError('Worker task timed out')
         }
         // Invalid requests fail identically on every attempt, and a failed webhook
@@ -101,7 +102,7 @@ export function startTaskWorker() {
         const data = axios.isAxiosError(err) ? (err.response?.data as any) : undefined
         if (status && ((status >= 400 && status < 500 && status !== 408 && status !== 429) || data?.code === 'WEBHOOK_FAILED')) {
           const message = typeof data?.error === 'string' ? data.error : 'Worker rejected the task'
-          resolver.reject(new WorkerRejectedError(status, message))
+          resolver.reject(new WorkerRejectedError(status, message, typeof data?.code === 'string' ? data.code : undefined))
           throw new UnrecoverableError(message)
         }
         // Keep the resolver for retries and settle it on the last failure.

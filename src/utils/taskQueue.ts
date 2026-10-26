@@ -14,6 +14,9 @@ const taskQueue = new Queue('tasks', {
 })
 taskQueue.on('error', () => error('[LB]', 'Queue connection error'))
 
+/** The task did not finish before its deadline; the Worker may still be running it. */
+export class TaskTimeoutError extends Error {}
+
 const pendingTasks: Record<string, { resolve: (result: any) => boolean; reject: (err: any) => boolean }> = {}
 const authKeyMap = new Map<string, string>()
 // Webhook headers often carry the receiver's credentials: keep them out of Redis and Bull Board.
@@ -32,7 +35,7 @@ export async function addTaskAndWait(payload: any, opts: { priority?: number; ti
   return new Promise((resolve, reject) => {
     const timer = setTimeout(() => {
       clearPendingTask(taskId)
-      reject(new Error('Task timed out'))
+      reject(new TaskTimeoutError('Task timed out'))
     }, timeoutMs)
     pendingTasks[taskId] = {
       resolve: result => {

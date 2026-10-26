@@ -105,6 +105,11 @@ test('actual LB + Redis: discovers, authenticates, dispatches and reports MCP sa
     }
     res.json({ success: true, result: { greeting: req.body.input.name } })
   })
+  const hooks = []
+  fake.post('/hook', (req, res) => {
+    hooks.push({ headers: req.headers, body: req.body })
+    res.sendStatus(204)
+  })
   fake.get('/logs', (req, res) => {
     assert.equal(req.headers['x-lb-auth'], LB_KEY)
     res.json({ logs: ['integration log'] })
@@ -283,6 +288,23 @@ test('actual LB + Redis: discovers, authenticates, dispatches and reports MCP sa
   assert.equal(accepted.status, 200)
   await waitFor(async () => requests.at(-1).body.mode === 'webhook')
   assert.deepEqual(requests.at(-1).body.webhook.headers, { Authorization: 'Bearer receiver-secret' }, 'Headers kept in memory reach the Worker')
+  const acceptedInvalid = await fetch(base + '/task', {
+    method: 'POST',
+    headers: { ...auth(LB_KEY), 'x-wr-auth': WORKER_KEY, 'content-type': 'application/json' },
+    body: JSON.stringify({
+      group: 'web',
+      contract: 1,
+      function: 'hello',
+      input: { name: 'Invalid' },
+      mode: 'webhook',
+      webhook: { url: 'http://127.0.0.1:' + fakeHttp.address().port + '/hook', headers: { Authorization: 'Bearer receiver-secret' } },
+    }),
+  })
+  assert.equal(acceptedInvalid.status, 200)
+  await waitFor(async () => hooks.length === 1)
+  assert.equal(hooks[0].headers['x-andera-status'], 'failed', 'A failed webhook task is reported to the receiver')
+  assert.equal(hooks[0].headers.authorization, 'Bearer receiver-secret')
+  assert.deepEqual(hooks[0].body, { success: false, error: 'Unexpected param: extra', code: 'WORKER_REJECTED' })
   malformedHealth = true
   await waitFor(async () => {
     const health = await (await fetch(base + '/health', { headers: auth(LB_KEY) })).json()
