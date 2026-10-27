@@ -99,7 +99,7 @@ Below are the main environment variables used by the Load Balancer. All variable
 | `MCP_ALLOWED_ORIGINS` | Comma-separated exact browser origins; native clients need none. | Empty |
 | `WORKERS_CONFIG_PATH` | Override for the Worker URL-list file, relative to the working directory or absolute. | Application-root `workers.json` |
 
-The table lists runtime defaults. The sample `.env` uses Docker's `redis` hostname, a 3000 ms discovery interval, and enables the optional dashboards. For local Redis outside Docker, set `REDIS_HOST=localhost`.
+The table lists runtime defaults. The sample `.env` uses Docker's `redis` hostname, a 3000ms discovery interval, and enables the optional dashboards. For local Redis outside Docker, set `REDIS_HOST=localhost`.
 
 ### Example `.env`
 
@@ -314,7 +314,7 @@ To enable it:
 
 Good to know:
 
-- Calls are synchronous, wait up to `TASK_TIMEOUT` (default 300 s) and are not retried. Many MCP clients give up after 60 s; the Worker then finishes the call but the result is discarded.
+- Calls are synchronous, wait up to `TASK_TIMEOUT` (default 300s) and are not retried. Many MCP clients give up after 60s; the Worker then finishes the call but the result is discarded.
 - The endpoint uses stateless Streamable HTTP with bearer authentication. OAuth is not implemented, so clients that require it, such as ChatGPT on the web, are not supported.
 - Authenticated `/health` shows the full MCP status, tool names, input schemas and configuration errors. The dashboard shows only a summary and no credentials.
 

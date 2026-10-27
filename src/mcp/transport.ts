@@ -96,7 +96,7 @@ export function createMcpRouter(adapter: McpAdapter): express.Router {
       try {
         const output = await entry.invoke(args)
         const text = JSON.stringify(output ?? null)
-        if (Buffer.byteLength(text, 'utf8') > 1024 * 1024) return toolError('Result exceeds the 1 MiB MCP limit')
+        if (Buffer.byteLength(text, 'utf8') > 1024 * 1024) return toolError('Result exceeds the 1MiB MCP limit')
         return { content: [{ type: 'text' as const, text }], structuredContent: { result: output ?? null } }
       } catch {
         adapter.report?.('MCP tool execution failed')

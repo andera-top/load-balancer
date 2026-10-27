@@ -26,7 +26,7 @@ export const config = {
 /** The key travels as a WebSocket subprotocol, which only allows HTTP token characters. */
 export const websocketSafeLbAuthKey = /^[!#$%&'*+\-.0-9A-Z^_`|a-z~]+$/.test(config.lbAuthKey)
 
-/** Largest delay setTimeout accepts; larger values fire after 1 ms. */
+/** Largest delay setTimeout accepts; larger values fire after 1ms. */
 export const MAX_TIMER_DELAY = 2147483647
 
 function assertConfig() {
